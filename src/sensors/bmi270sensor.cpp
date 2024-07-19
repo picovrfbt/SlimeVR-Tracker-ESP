@@ -1080,3 +1080,7 @@ void BMI270Sensor::getMagnetometerXYZFromBuffer(uint8_t* data, int16_t* x, int16
         *z = ((int16_t)data[5] << 8) | data[4];
     #endif
 }
+
+void BMI270Sensor::deinitialize() {
+    imu.deinitialize();
+}

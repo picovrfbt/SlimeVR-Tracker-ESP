@@ -455,6 +455,7 @@ class BMI270 {
         void selectFeaturePage(uint8_t page);
         bool performCRT(uint8_t &gainX, uint8_t &gainY, uint8_t &gainZ);
         void applyGyroGain(uint8_t &gainX, uint8_t &gainY, uint8_t &gainZ);
+        void deinitialize();
 
     private:
         uint8_t buffer[14];

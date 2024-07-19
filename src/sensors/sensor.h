@@ -88,6 +88,8 @@ public:
         return newFusedRotation || newAcceleration;
     };
 
+    virtual void deinitialize() {};
+
     bool hadData = false;
 protected:
     uint8_t addr = 0;

@@ -1183,3 +1183,7 @@ bool BMI270::getSensorTime(uint32_t *v_sensor_time_u32) {
     );
     return ok;
 }
+
+void BMI270::deinitialize() {
+    setRegister(BMI270_RA_CMD, BMI270_CMD_SOFT_RESET);
+}
