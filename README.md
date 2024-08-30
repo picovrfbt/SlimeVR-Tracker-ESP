@@ -31,17 +31,16 @@ The following IMUs and their corresponding `IMU` values are supported by the fir
   * Calibration file format is unstable and may not be able to load using newer firmware versions.
   * Experimental support!
   * Support for the following magnetometers is implemented (even more experimental): HMC5883L, QMC5883L.
-* BMI270 (IMU_BMI270)
-  * Based on BMI160 code.
-  * Using sensor fusion of Gyroscope and Accelerometer.
-  * By default motionless gyroscope sensitivity error compensation is performed during first calibration.
-  * In-use Offset Compensation is supported, but turned off by default (initial testing show worse performance than manual calibration).
-  * Experimental support!
-  * Support for magnetometers is currently not implemented.
 * ICM-20948 (IMU_ICM20948)
   * Using fusion in internal DMP for 6Dof or 9DoF, 9DoF mode requires good magnetic environment.
   * Comment out `USE_6DOF` in `debug.h` for 9DoF mode.
   * Experimental support!
+* BMI270 (IMU_BMI270), ICM-42688 (IMU_ICM42688), LSM6DS3TR-C (IMU_LSM6DS3TRC), LSM6DSV (IMU_LSM6DSV), LSM6DSO (IMU_LSM6DSO), LSM6DSR (IMU_LSM6DSR), MPU-6050 (IMU_MPU6050_SF)
+  * Using common code: SoftFusionSensor for sensor fusion of Gyroscope and Accelerometer.
+  * Gyro&Accel sample rate, gyroscope offset and 6-side accelerometer calibration supported.
+  * In case of BMI270, gyroscope sensitivity auto-calibration (CRT) is additionally performed.
+  * Support for magnetometers is currently not implemented.
+  * VERY experimental support!
 
 Firmware can work with both ESP8266 and ESP32. Please edit `defines.h` and set your pinout properly according to how you connected the IMU.
 
