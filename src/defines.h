@@ -27,10 +27,10 @@
 
 // Set parameters of IMU and board used
 #define IMU IMU_BNO085
-#define SECOND_IMU IMU
-#define BOARD BOARD_SLIMEVR
-#define IMU_ROTATION DEG_270
-#define SECOND_IMU_ROTATION DEG_270
+#define SECOND_IMU IMU_BNO085
+#define BOARD BOARD_LOLIN_C3_MINI
+#define IMU_ROTATION DEG_180
+#define SECOND_IMU_ROTATION DEG_90
 
 #define PRIMARY_IMU_OPTIONAL false
 #define SECONDARY_IMU_OPTIONAL true
@@ -40,7 +40,7 @@
 // #define PRIMARY_IMU_ADDRESS_ONE 0x4a
 // #define SECONDARY_IMU_ADDRESS_TWO 0x4b
 
-#define MAX_IMU_COUNT 2
+#define MAX_IMU_COUNT 1
 
 // Axis mapping example
 /*
@@ -182,12 +182,12 @@ PIN_IMU_SDA, PRIMARY_IMU_OPTIONAL, BMI160_QMC_REMAP) \
 //  #define LED_PIN 2
 //  #define LED_INVERTED false
 #elif BOARD == BOARD_LOLIN_C3_MINI
-#define PIN_IMU_SDA 5
+#define PIN_IMU_SDA 6
 #define PIN_IMU_SCL 4
-#define PIN_IMU_INT 6
+#define PIN_IMU_INT 10
 #define PIN_IMU_INT_2 8
 #define PIN_BATTERY_LEVEL 3
-#define LED_PIN 7
+#define LED_PIN 0
 //  #define LED_INVERTED false
 #elif BOARD == BOARD_BEETLE32C3
 #define PIN_IMU_SDA 8

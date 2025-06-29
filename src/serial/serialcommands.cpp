@@ -193,8 +193,10 @@ String getEncryptionTypeName(wifi_auth_mode_t type) {
 			return "WPA2_WPA3_PSK";
 		case WIFI_AUTH_WAPI_PSK:
 			return "WAPI_PSK";
+#ifdef WIFI_AUTH_WPA3_ENT_192
 		case WIFI_AUTH_WPA3_ENT_192:
 			return "WPA3_ENT_192";
+#endif
 	}
 #else
 String getEncryptionTypeName(uint8_t type) {

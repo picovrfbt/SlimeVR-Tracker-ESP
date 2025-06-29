@@ -33,8 +33,13 @@ template <template <typename I2CImpl> typename T, typename I2CImpl>
 class SoftFusionSensor : public Sensor {
 	using imu = T<I2CImpl>;
 
-	static constexpr bool Uses32BitSensorData
-		= requires(imu& i) { i.Uses32BitSensorData; };
+	// SFINAE to detect if Uses32BitSensorData exists
+	template<typename U>
+	static auto check_uses_32bit(int) -> decltype(U::Uses32BitSensorData, std::true_type{});
+	template<typename>
+	static std::false_type check_uses_32bit(...);
+	
+	static constexpr bool Uses32BitSensorData = decltype(check_uses_32bit<imu>(0))::value;
 
 	using RawSensorT =
 		typename std::conditional<Uses32BitSensorData, int32_t, int16_t>::type;
@@ -53,8 +58,14 @@ class SoftFusionSensor : public Sensor {
 		= ((32768. / imu::GyroSensitivity) / 32768.) * (PI / 180.0);
 	static constexpr double AScale = CONST_EARTH_GRAVITY / imu::AccelSensitivity;
 
-	static constexpr bool HasMotionlessCalib
-		= requires(imu& i) { typename imu::MotionlessCalibrationData; };
+	// SFINAE to detect if MotionlessCalibrationData exists
+	template<typename U>
+	static auto check_motionless_calib(int) -> decltype(typename U::MotionlessCalibrationData{}, std::true_type{});
+	template<typename>
+	static std::false_type check_motionless_calib(...);
+	
+	static constexpr bool HasMotionlessCalib = decltype(check_motionless_calib<imu>(0))::value;
+	
 	static constexpr size_t MotionlessCalibDataSize() {
 		if constexpr (HasMotionlessCalib) {
 			return sizeof(typename imu::MotionlessCalibrationData);
