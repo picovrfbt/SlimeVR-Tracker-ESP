@@ -135,6 +135,31 @@ void onConnected() {
 
 uint8_t WiFiNetwork::getWiFiState() { return wifiState; }
 
+void WiFiNetwork::stop() {
+	stopProvisioning();
+#if ESP8266
+	// ESP8266's disconnect() also erases the saved network; this path is only
+	// used by the dongle, which needs an ESP32.
+#else
+	WiFi.disconnect(false, false);
+#endif
+	isWifiConnected = false;
+}
+
+bool WiFiNetwork::hasSavedCredentials() {
+#if ESP8266
+	return WiFi.SSID().length() > 0;
+#else
+	// WiFi.SSID() only names the network we are connected to; read the saved
+	// station config instead.
+	wifi_config_t conf;
+	if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK) {
+		return false;
+	}
+	return conf.sta.ssid[0] != 0;
+#endif
+}
+
 void WiFiNetwork::upkeep() {
 	upkeepProvisioning();
 	if (WiFi.status() != WL_CONNECTED) {

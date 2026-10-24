@@ -24,12 +24,12 @@
 #define SLIMEVR_NETWORK_CONNECTION_H_
 
 #include <Arduino.h>
-#include <WiFiUdp.h>
 
 #include "featureflags.h"
 #include "globals.h"
 #include "quat.h"
 #include "sensors/sensor.h"
+#include "transport.h"
 #include "wifihandler.h"
 
 namespace SlimeVR {
@@ -37,15 +37,9 @@ namespace Network {
 
 class Connection {
 public:
-	Connection() {
-#ifdef SERVER_IP
-		m_ServerHost.fromString(SERVER_IP);
-#endif
-
-#ifdef SERVER_PORT
-		m_ServerPort = SERVER_PORT;
-#endif
-	}
+	// Wi-Fi/UDP or the PicoVR Dongle. Switching drops the server connection, so
+	// the next update starts a fresh handshake over the new link.
+	void setTransport(Transport* transport);
 
 	void searchForServer();
 	void update();
@@ -161,12 +155,10 @@ private:
 	bool m_Connected = false;
 	SlimeVR::Logging::Logger m_Logger = SlimeVR::Logging::Logger("UDPConnection");
 
-	WiFiUDP m_UDP;
+	Transport* m_Transport = nullptr;
 	unsigned char m_Packet[128];  // buffer for incoming packets
 	uint64_t m_PacketNumber = 0;
 
-	int m_ServerPort = 6969;
-	IPAddress m_ServerHost = IPAddress(255, 255, 255, 255);
 	unsigned long m_LastConnectionAttemptTimestamp;
 	unsigned long m_LastPacketTimestamp;
 

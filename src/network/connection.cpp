@@ -71,15 +71,12 @@ bool Connection::beginPacket() {
 		return true;
 	}
 
-	int r = m_UDP.beginPacket(m_ServerHost, m_ServerPort);
-	if (r == 0) {
-		// This *technically* should *never* fail, since the underlying UDP
-		// library just returns 1.
-
-		m_Logger.warn("UDP beginPacket() failed");
+	if (m_Transport == nullptr || !m_Transport->beginPacket()) {
+		m_Logger.warn("beginPacket() failed");
+		return false;
 	}
 
-	return r > 0;
+	return true;
 }
 
 bool Connection::endPacket() {
@@ -102,15 +99,7 @@ bool Connection::endPacket() {
 		return true;
 	}
 
-	int r = m_UDP.endPacket();
-	if (r == 0) {
-		// This is usually just `ERR_ABRT` but the UDP client doesn't expose
-		// the full error code to us, so we just have to live with it.
-
-		// m_Logger.warn("UDP endPacket() failed");
-	}
-
-	return r > 0;
+	return m_Transport != nullptr && m_Transport->endPacket();
 }
 
 bool Connection::beginBundle() {
@@ -143,7 +132,7 @@ size_t Connection::write(const uint8_t* buffer, size_t size) {
 		m_BundlePacketPosition += size;
 		return size;
 	}
-	return m_UDP.write(buffer, size);
+	return m_Transport != nullptr ? m_Transport->write(buffer, size) : 0;
 }
 
 size_t Connection::write(uint8_t byte) { return write(&byte, 1); }
@@ -213,7 +202,9 @@ bool Connection::sendLongString(const char* str) {
 	return sendBytes((const uint8_t*)str, size);
 }
 
-int Connection::getWriteError() { return m_UDP.getWriteError(); }
+int Connection::getWriteError() {
+	return m_Transport != nullptr ? m_Transport->getWriteError() : 1;
+}
 
 // PACKET_HEARTBEAT 0
 void Connection::sendHeartbeat() {
@@ -555,22 +546,21 @@ void Connection::maybeRequestFeatureFlags() {
 
 void Connection::searchForServer() {
 	while (true) {
-		int packetSize = m_UDP.parsePacket();
+		int packetSize = m_Transport->parsePacket();
 		if (!packetSize) {
 			break;
 		}
 
-		// receive incoming UDP packets
-		[[maybe_unused]] int len = m_UDP.read(m_Packet, sizeof(m_Packet));
+		// receive incoming packets
+		[[maybe_unused]] int len = m_Transport->read(m_Packet, sizeof(m_Packet));
 
 #ifdef DEBUG_NETWORK
 		m_Logger.trace(
-			"Received %d bytes from %s, port %d",
+			"Received %d bytes from %s",
 			packetSize,
-			m_UDP.remoteIP().toString().c_str(),
-			m_UDP.remotePort()
+			m_Transport->remoteName()
 		);
-		m_Logger.traceArray("UDP packet contents: ", m_Packet, len);
+		m_Logger.traceArray("Packet contents: ", m_Packet, len);
 #else
 		(void)len;
 #endif
@@ -583,8 +573,7 @@ void Connection::searchForServer() {
 				continue;
 			}
 
-			m_ServerHost = m_UDP.remoteIP();
-			m_ServerPort = m_UDP.remotePort();
+			m_Transport->serverFound();
 			m_LastPacketTimestamp = millis();
 			m_Connected = true;
 
@@ -594,11 +583,7 @@ void Connection::searchForServer() {
 			statusManager.setStatus(SlimeVR::Status::SERVER_CONNECTING, false);
 			ledManager.off();
 
-			m_Logger.debug(
-				"Handshake successful, server is %s:%d",
-				m_UDP.remoteIP().toString().c_str(),
-				m_UDP.remotePort()
-			);
+			m_Logger.debug("Handshake successful, server is %s", m_Transport->remoteName());
 
 			break;
 		}
@@ -617,6 +602,16 @@ void Connection::searchForServer() {
 	}
 }
 
+void Connection::setTransport(Transport* transport) {
+	m_Transport = transport;
+	m_Connected = false;
+	std::fill(
+		m_AckedSensorState,
+		m_AckedSensorState + MAX_IMU_COUNT,
+		SensorStatus::SENSOR_OFFLINE
+	);
+}
+
 void Connection::reset() {
 	m_Connected = false;
 	std::fill(
@@ -625,7 +620,9 @@ void Connection::reset() {
 		SensorStatus::SENSOR_OFFLINE
 	);
 
-	m_UDP.begin(m_ServerPort);
+	if (m_Transport != nullptr) {
+		m_Transport->begin();
+	}
 
 	statusManager.setStatus(SlimeVR::Status::SERVER_CONNECTING, true);
 }
@@ -655,22 +652,17 @@ void Connection::update() {
 		return;
 	}
 
-	int packetSize = m_UDP.parsePacket();
+	int packetSize = m_Transport->parsePacket();
 	if (!packetSize) {
 		return;
 	}
 
 	m_LastPacketTimestamp = millis();
-	int len = m_UDP.read(m_Packet, sizeof(m_Packet));
+	int len = m_Transport->read(m_Packet, sizeof(m_Packet));
 
 #ifdef DEBUG_NETWORK
-	m_Logger.trace(
-		"Received %d bytes from %s, port %d",
-		packetSize,
-		m_UDP.remoteIP().toString().c_str(),
-		m_UDP.remotePort()
-	);
-	m_Logger.traceArray("UDP packet contents: ", m_Packet, len);
+	m_Logger.trace("Received %d bytes from %s", packetSize, m_Transport->remoteName());
+	m_Logger.traceArray("Packet contents: ", m_Packet, len);
 #else
 	(void)packetSize;
 #endif
@@ -690,6 +682,17 @@ void Connection::update() {
 
 		case PACKET_RECEIVE_COMMAND:
 			break;
+
+		case PACKET_PICOVR_SET_LINK: {
+			// Packet type (4) + packet number (8) + mode (1), optionally followed by
+			// dongle address (6) + channel (1) + pairing key (16) to bind first.
+			if (len < 13) {
+				m_Logger.warn("Invalid link packet: too short");
+				break;
+			}
+			networkManager.requestLink(m_Packet + 12, len - 12);
+			break;
+		}
 
 		case PACKET_CONFIG:
 			break;

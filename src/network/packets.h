@@ -55,6 +55,10 @@
 
 #define PACKET_BUNDLE 100
 
+// PicoVR extension, server -> tracker: switch between Wi-Fi and the PicoVR
+// Dongle (and optionally bind to a dongle first). See network/manager.h.
+#define PACKET_PICOVR_SET_LINK 200
+
 #define PACKET_INSPECTION 105  // 0x69
 
 #define PACKET_RECEIVE_HEARTBEAT 1
