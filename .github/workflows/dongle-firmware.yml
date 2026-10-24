@@ -1,0 +1,81 @@
+name: PicoVR Dongle firmware
+
+# Builds the dongle (and the dual-mode tracker firmware it talks to) on every
+# push. A tag named dongle-vX.Y.Z publishes picovr-dongle-esp32c3.bin and
+# picovr-dongle.json as a GitHub release, which the PicoVR server downloads.
+
+on:
+  push:
+    branches: [picovr-dongle]
+    tags: ['dongle-v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('platformio.ini', 'dongle-firmware/platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build dongle
+        run: pio run -d dongle-firmware
+
+      - name: Build tracker (picovr_c3)
+        run: pio run -e picovr_c3
+
+      - name: Package dongle
+        run: |
+          VERSION=""
+          if [[ "$GITHUB_REF" == refs/tags/dongle-v* ]]; then
+            VERSION="${GITHUB_REF_NAME#dongle-v}"
+          fi
+          cd dongle-firmware
+          python scripts/package.py dist $VERSION
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: picovr-dongle
+          path: dongle-firmware/dist/
+          retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/dongle-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: picovr-dongle
+          path: dist
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#dongle-v}"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "PicoVR Dongle $VERSION" \
+            --latest=false \
+            --notes "PicoVR Dongle firmware $VERSION for the XIAO ESP32-C3. Flash picovr-dongle-esp32c3.bin at 0x0; the PicoVR app does this for you."
