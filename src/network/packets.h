@@ -23,7 +23,8 @@
 
 #ifndef SLIMEVR_PACKETS_H_
 #define SLIMEVR_PACKETS_H_
-
+#define POWERSAVING_MODE POWER_SAVING_NONE 
+// added for testing of trackers
 #define PACKET_HEARTBEAT 0
 // #define PACKET_ROTATION 1 // Deprecated
 // #define PACKET_GYRO 2 // Deprecated
