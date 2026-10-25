@@ -79,6 +79,10 @@ public:
 		SENSOR_CONFIG = 2,
 		// Add new flags here
 
+		// PicoVR: understands PACKET_PICOVR_SET_LINK (Wi-Fi / Dongle / Auto).
+		// A high bit, so upstream flags added above never collide with it.
+		PICOVR_LINK = 31,
+
 		BITS_TOTAL,
 	};
 
@@ -86,7 +90,8 @@ public:
 	static constexpr const std::initializer_list<EFirmwareFeatureFlags> flagsEnabled = {
 		// EXAMPLE_FEATURE,
 		B64_WIFI_SCANNING,
-		SENSOR_CONFIG
+		SENSOR_CONFIG,
+		PICOVR_LINK
 		// Add enabled flags here
 	};
 
