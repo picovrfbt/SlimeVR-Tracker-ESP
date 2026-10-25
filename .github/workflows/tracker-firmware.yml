@@ -1,0 +1,79 @@
+name: PicoVR tracker firmware
+
+# Builds the PicoVR tracker firmware variants on every push. A tag named
+# tracker-vX.Y.Z publishes them as a GitHub release, which the PicoVR server
+# downloads and flashes over USB.
+
+on:
+  push:
+    branches: [picovr-dongle]
+    tags: ['tracker-v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the firmware version comes from the tag
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build tracker variants
+        run: pio run -e picovr_topaz -e picovr_topaz_bno
+
+      - name: Package
+        run: |
+          VERSION=""
+          if [[ "$GITHUB_REF" == refs/tags/tracker-v* ]]; then
+            VERSION="${GITHUB_REF_NAME#tracker-v}"
+          fi
+          python scripts/package_tracker.py dist-tracker $VERSION
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: picovr-tracker
+          path: dist-tracker/
+          retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/tracker-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: picovr-tracker
+          path: dist-tracker
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#tracker-v}"
+          gh release create "$GITHUB_REF_NAME" dist-tracker/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "PicoVR Tracker firmware $VERSION" \
+            --latest=false \
+            --notes "PicoVR tracker firmware $VERSION for PicoVR V3.1 boards (ESP32-C3). Each variant flashes at 0x0; the PicoVR app picks the right one and does this for you."

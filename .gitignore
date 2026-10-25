@@ -1,2 +1,3 @@
 .pio/
 dongle-firmware/dist/
+dist-tracker/
