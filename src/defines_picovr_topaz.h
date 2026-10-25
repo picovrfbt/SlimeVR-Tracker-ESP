@@ -1,15 +1,34 @@
-// PicoVR V3.1 trackers (Topaz, ESP32-C3-MINI-1) with one LSM6DSV, as the web
-// flasher configures them (board BOARD_TOPAZESTROGEN there): SDA 6, SCL 4, no
-// IMU interrupt, LED on pin 0 (inverted), external battery sense on pin 3 with a
-// 150k/150k divider. Used instead of defines.h when built with -DPICOVR_TOPAZ
-// (PlatformIO env picovr_topaz).
+// PicoVR V3.1 trackers (Topaz, ESP32-C3-MINI-1), the same settings the web
+// flasher writes for board BOARD_TOPAZESTROGEN: SDA 6, SCL 4, LED on pin 0
+// (inverted), external battery sense on pin 3 with a 150k/150k divider.
+// Used instead of defines.h when built with -DPICOVR_TOPAZ.
+//
+// Two IMU variants, picked by PlatformIO env:
+//   picovr_topaz      LSM6DSV, no interrupt pin, rotation 0  (the user's trackers)
+//   picovr_topaz_bno  BNO085, interrupt on pin 10, rotation 180
+//
+// NOTE on rotation: the flasher's board definition carries
+// DEFAULT_IMU_ROTATION 90, but that is only what the IMU row is pre-filled
+// with when you pick this board. The saved config overrides it per IMU, and
+// the PicoVR trackers' config sets the LSM6DSV to 0.
 #pragma once
 
-#define IMU IMU_LSM6DSV
-#define SECOND_IMU IMU_BMI270
 #define BOARD BOARD_CUSTOM
+
+#ifdef PICOVR_TOPAZ_BNO
+#define IMU IMU_BNO085
+#define IMU_ROTATION DEG_180
+#define PIN_IMU_INT 10
+#else
+#define IMU IMU_LSM6DSV
 #define IMU_ROTATION DEG_0
+#define PIN_IMU_INT 255
+#endif
+
+// One IMU is fitted; the second is listed only because defines.h expects it.
+#define SECOND_IMU IMU_BMI270
 #define SECOND_IMU_ROTATION DEG_90
+#define PIN_IMU_INT_2 255
 
 #define PRIMARY_IMU_OPTIONAL false
 #define SECONDARY_IMU_OPTIONAL true
@@ -18,8 +37,6 @@
 
 #define PIN_IMU_SDA 6
 #define PIN_IMU_SCL 4
-#define PIN_IMU_INT 255
-#define PIN_IMU_INT_2 255
 
 #define IMU_DESC_LIST            \
 	IMU_DESC_ENTRY(              \
