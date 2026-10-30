@@ -20,6 +20,7 @@
 #include <freertos/queue.h>
 #include <string.h>
 
+#include "dongleota.h"
 #include "dongleprotocol.h"
 #include "framing.h"
 #include "picolink.h"
@@ -27,7 +28,7 @@
 namespace {
 
 constexpr uint8_t FIRMWARE_MAJOR = 1;
-constexpr uint8_t FIRMWARE_MINOR = 0;
+constexpr uint8_t FIRMWARE_MINOR = 1;
 constexpr uint8_t FIRMWARE_PATCH = 0;
 
 constexpr uint8_t DEFAULT_CHANNEL = 11;
@@ -63,10 +64,16 @@ bool radioReady = false;
 
 uint32_t lastBeaconAt = 0;
 
-// USB serial: frames in, frames out.
-uint8_t serialIn[Framing::encodedSize(260) + 8];
+// USB serial: frames in, frames out. A firmware chunk is the longest thing
+// that ever arrives, so the buffers are cut to fit one of those.
+constexpr size_t MAX_COMMAND = 1 + 4 + DongleProtocol::OTA_MAX_CHUNK + 2;
+uint8_t serialIn[Framing::encodedSize(MAX_COMMAND) + 8];
 size_t serialInLength = 0;
 bool serialInOverflow = false;
+
+// Set once the dongle has been told to restart into new firmware, so the
+// answer goes out before it does.
+bool restartWanted = false;
 
 // ---------------------------------------------------------------- settings
 
@@ -318,6 +325,9 @@ void handleCommand(const uint8_t* frame, size_t length) {
 
 	switch (command) {
 		case DongleProtocol::CMD_HELLO:
+			// The server is talking to us, so this firmware works: stop the
+			// bootloader from putting the old one back on the next restart.
+			DongleOta::confirm();
 			sendHello();
 			return;
 
@@ -425,6 +435,29 @@ void handleCommand(const uint8_t* frame, size_t length) {
 			scanChannels();
 			return;
 
+		case DongleProtocol::CMD_OTA_BEGIN:
+			sendResult(command, DongleOta::begin(body, bodyLength));
+			return;
+
+		case DongleProtocol::CMD_OTA_CHUNK:
+			sendResult(command, DongleOta::chunk(body, bodyLength));
+			return;
+
+		case DongleProtocol::CMD_OTA_END: {
+			uint8_t status = DongleOta::end();
+			sendResult(command, status);
+			if (status == DongleProtocol::STATUS_OK) {
+				sendLog("New firmware checked; restarting into it");
+				restartWanted = true;
+			}
+			return;
+		}
+
+		case DongleProtocol::CMD_OTA_ABORT:
+			DongleOta::abort();
+			sendResult(command, DongleProtocol::STATUS_OK);
+			return;
+
 		case DongleProtocol::CMD_NEW_PAIRING:
 			portENTER_CRITICAL(&trackersLock);
 			for (uint8_t i = 0; i < trackerCount; i++) {
@@ -446,7 +479,8 @@ void handleCommand(const uint8_t* frame, size_t length) {
 }
 
 void handleSerialFrame() {
-	uint8_t frame[sizeof(serialIn)];
+	// Static: a kilobyte of firmware is too much for the loop task's stack.
+	static uint8_t frame[sizeof(serialIn)];
 	size_t length = Framing::cobsDecode(serialIn, serialInLength, frame, sizeof(frame));
 	if (length < 3) {
 		return;
@@ -493,6 +527,9 @@ void forwardTrackerPackets() {
 }  // namespace
 
 void setup() {
+	// Room for a whole firmware chunk, so none of it is lost while the loop is
+	// busy writing the last one to flash.
+	Serial.setRxBufferSize(4 * 1024);
 	Serial.begin(115200);
 	Serial.setTxTimeoutMs(0);
 
@@ -506,6 +543,11 @@ void setup() {
 
 void loop() {
 	readSerial();
+	if (restartWanted) {
+		Serial.flush();
+		delay(100);
+		ESP.restart();
+	}
 	forwardTrackerPackets();
 
 	uint32_t now = millis();

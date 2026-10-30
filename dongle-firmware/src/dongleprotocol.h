@@ -14,6 +14,7 @@
 #ifndef PICOVR_DONGLE_PROTOCOL_H_
 #define PICOVR_DONGLE_PROTOCOL_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 namespace DongleProtocol {
@@ -29,6 +30,13 @@ constexpr uint8_t CMD_GET_KEY = 0x07;  // (none)
 constexpr uint8_t CMD_SET_KEY = 0x08;  // pairing key (16)
 constexpr uint8_t CMD_SCAN = 0x09;  // (none): how busy is each channel?
 constexpr uint8_t CMD_NEW_PAIRING = 0x0A;  // (none): new key, forget all trackers
+// Updating the dongle's own firmware over this port. Every one of these is
+// answered with MSG_RESULT before the next is sent, so the transfer paces
+// itself and nothing needs to be resent: USB does not lose bytes.
+constexpr uint8_t CMD_OTA_BEGIN = 0x0B;  // size (4, LE) + sha256 (32)
+constexpr uint8_t CMD_OTA_CHUNK = 0x0C;  // offset (4, LE) + bytes
+constexpr uint8_t CMD_OTA_END = 0x0D;  // (none): check it, then restart into it
+constexpr uint8_t CMD_OTA_ABORT = 0x0E;  // (none)
 
 // Dongle -> PC
 constexpr uint8_t MSG_HELLO = 0x81;
@@ -54,6 +62,14 @@ constexpr uint8_t STATUS_FULL = 2;
 constexpr uint8_t STATUS_NOT_FOUND = 3;
 constexpr uint8_t STATUS_RADIO_ERROR = 4;
 constexpr uint8_t STATUS_UNKNOWN_COMMAND = 5;
+constexpr uint8_t STATUS_NO_ROOM = 6;
+constexpr uint8_t STATUS_OUT_OF_ORDER = 7;
+constexpr uint8_t STATUS_WRITE_FAILED = 8;
+constexpr uint8_t STATUS_BAD_IMAGE = 9;
+constexpr uint8_t STATUS_NOT_UPDATING = 10;
+
+// The most firmware one CMD_OTA_CHUNK may carry.
+constexpr size_t OTA_MAX_CHUNK = 1024;
 
 }  // namespace DongleProtocol
 

@@ -86,9 +86,30 @@ sends `CMD_HELLO` when it opens the port; only a dongle answers
 | `LIST`, `GET_KEY`, `SET_KEY` | | `SCAN` | frames heard on channels 1–13 |
 | `SCAN` | how busy is each channel | `LOG` | text |
 | `NEW_PAIRING` | new key, forget all trackers | | |
+| `OTA_BEGIN` size + sha256 | take new firmware | | |
+| `OTA_CHUNK` offset + bytes | up to 1024 bytes, in order | | |
+| `OTA_END` | check it and restart into it | | |
+| `OTA_ABORT` | forget it | | |
 
 Channel, key and the allowed list are kept in NVS. A new dongle makes a random
 key and starts on channel 11.
+
+### Updating the dongle itself (firmware 1.1.0 and later)
+
+No cable swap and no download mode: the dongle takes new firmware over this
+same port. The server sends `OTA_BEGIN` with the size and SHA-256 of the image,
+then the image in chunks, then `OTA_END`. Every one of those is answered with
+`RESULT` before the next is sent — USB does not lose bytes, so there is no
+window to track and nothing to resend.
+
+What arrives is the **app only**, not the whole-flash release image: the server
+slices it out at `0x10000`. It goes into the app slot that is not running, so
+NVS survives and trackers stay bound. It is armed only once every byte matches
+the digest, and `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` means the bootloader
+restores the old firmware unless the new one answers a `HELLO`.
+
+Trackers lose the beacon for the few seconds this takes (the slot is erased
+first) and find it again afterwards, the same as a channel change.
 
 ### Binding sequence
 
