@@ -23,6 +23,8 @@
 
 #include "connection.h"
 
+#include "ota.h"
+
 #include "GlobalVars.h"
 #include "logging/Logger.h"
 #include "packets.h"
@@ -220,6 +222,9 @@ void Connection::sendHeartbeat() {
 
 // PACKET_ACCEL 4
 void Connection::sendSensorAcceleration(uint8_t sensorId, Vector3 vector) {
+	// Writing flash stalls the loop, and a tracker being updated is not in use.
+	MUST(!PicoOta::busy());
+
 	MUST(m_Connected);
 
 	MUST(beginPacket());
@@ -299,6 +304,9 @@ void Connection::sendRotationData(
 	uint8_t dataType,
 	uint8_t accuracyInfo
 ) {
+	// Writing flash stalls the loop, and a tracker being updated is not in use.
+	MUST(!PicoOta::busy());
+
 	MUST(m_Connected);
 
 	MUST(beginPacket());
@@ -359,6 +367,21 @@ void Connection::sendTemperature(uint8_t sensorId, float temperature) {
 }
 
 // PACKET_FEATURE_FLAGS 22
+void Connection::sendOtaStatus() {
+	MUST(m_Connected);
+
+	MUST(beginPacket());
+
+	MUST(sendPacketType(PACKET_PICOVR_OTA_STATUS));
+	MUST(sendPacketNumber());
+	MUST(sendByte(static_cast<uint8_t>(PicoOta::state())));
+	MUST(sendByte(static_cast<uint8_t>(PicoOta::error())));
+	MUST(sendInt(PicoOta::received()));
+	MUST(sendInt(PicoOta::expected()));
+
+	MUST(endPacket());
+}
+
 void Connection::sendFeatureFlags() {
 	MUST(m_Connected);
 
@@ -584,6 +607,9 @@ void Connection::searchForServer() {
 			ledManager.off();
 
 			m_Logger.debug("Handshake successful, server is %s", m_Transport->remoteName());
+			// We are talking to the server, so this firmware works: stop the
+			// bootloader from going back to the previous one.
+			PicoOta::confirm();
 
 			break;
 		}
@@ -681,6 +707,42 @@ void Connection::update() {
 			break;
 
 		case PACKET_RECEIVE_COMMAND:
+			break;
+
+		case PACKET_PICOVR_OTA_BEGIN:
+			PicoOta::begin(m_Packet + 12, len - 12);
+			m_OtaChunksSinceStatus = 0;
+			sendOtaStatus();
+			break;
+
+		case PACKET_PICOVR_OTA_CHUNK:
+			if (!PicoOta::chunk(m_Packet + 12, len - 12)) {
+				// Out of step or broken: tell the server where we actually are.
+				sendOtaStatus();
+			} else if (
+				PicoOta::received() == PicoOta::expected()
+				|| ++m_OtaChunksSinceStatus >= OTA_STATUS_EVERY_CHUNKS
+			) {
+				// Report on every sixteenth chunk, and always on the last one:
+				// otherwise the tail of an image is never acknowledged.
+				m_OtaChunksSinceStatus = 0;
+				sendOtaStatus();
+			}
+			break;
+
+		case PACKET_PICOVR_OTA_END: {
+			bool restarting = PicoOta::end();
+			sendOtaStatus();
+			if (restarting) {
+				delay(100);  // let the status leave before the lights go out
+				ESP.restart();
+			}
+			break;
+		}
+
+		case PACKET_PICOVR_OTA_ABORT:
+			PicoOta::abort();
+			sendOtaStatus();
 			break;
 
 		case PACKET_PICOVR_SET_LINK: {

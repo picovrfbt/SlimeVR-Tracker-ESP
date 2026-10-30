@@ -58,6 +58,12 @@
 // PicoVR extension, server -> tracker: switch between Wi-Fi and the PicoVR
 // Dongle (and optionally bind to a dongle first). See network/manager.h.
 #define PACKET_PICOVR_SET_LINK 200
+// Firmware over the air, carried the same way on Wi-Fi and through a dongle.
+#define PACKET_PICOVR_OTA_BEGIN 201
+#define PACKET_PICOVR_OTA_CHUNK 202
+#define PACKET_PICOVR_OTA_END 203
+#define PACKET_PICOVR_OTA_ABORT 204
+#define PACKET_PICOVR_OTA_STATUS 205
 
 #define PACKET_INSPECTION 105  // 0x69
 

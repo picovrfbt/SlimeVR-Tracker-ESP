@@ -78,6 +78,9 @@ public:
 	// PACKET_FEATURE_FLAGS 22
 	void sendFeatureFlags();
 
+	// Where this tracker is up to in an update, so the server knows what to send.
+	void sendOtaStatus();
+
 #if ENABLE_INSPECTION
 	void sendInspectionRawIMUData(
 		uint8_t sensorId,
@@ -156,7 +159,14 @@ private:
 	SlimeVR::Logging::Logger m_Logger = SlimeVR::Logging::Logger("UDPConnection");
 
 	Transport* m_Transport = nullptr;
-	unsigned char m_Packet[128];  // buffer for incoming packets
+	// Big enough for a firmware chunk: the dongle's frame is the limit at 244
+	// bytes, and a packet carries 12 bytes of header before its payload.
+	unsigned char m_Packet[260];  // buffer for incoming packets
+
+	// How often a tracker reports its progress during an update: often enough
+	// that a lost chunk is noticed quickly, rarely enough not to flood the link.
+	static constexpr uint8_t OTA_STATUS_EVERY_CHUNKS = 16;
+	uint8_t m_OtaChunksSinceStatus = 0;
 	uint64_t m_PacketNumber = 0;
 
 	unsigned long m_LastConnectionAttemptTimestamp;
