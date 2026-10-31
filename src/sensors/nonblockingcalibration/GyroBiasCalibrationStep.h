@@ -155,6 +155,14 @@ public:
 		}
 	}
 
+	// How far the tracker's temperature has to move off the first point before a
+	// second one will be accepted. Worth knowing outside this class: a tracker
+	// that never moves this far never gets a second point, and so never gets
+	// temperature-interpolated bias.
+	static constexpr float temperatureDifferenceNeeded() {
+		return gyroBiasTemperatureDifference;
+	}
+
 	void swapCalibrationIfNecessary() {
 		if (sensorConfig.gyroPointsCalibrated == 2
 			&& sensorConfig.gyroMeasurementTemperature1

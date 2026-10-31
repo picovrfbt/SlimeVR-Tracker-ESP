@@ -25,6 +25,7 @@
 
 #include <vector3.h>
 
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -60,6 +61,9 @@ public:
 	void setup(Configuration::NonBlockingSensorConfig& baseCalibrationConfig) {
 		sensorConfig = baseCalibrationConfig;
 		startupMillis = millis();
+		// printCalibration() below already says where gyro bias stands, so the
+		// first periodic report is a minute away rather than immediate.
+		lastGyroBiasReportMillis = startupMillis;
 
 		gyroBiasCalibrationStep.swapCalibrationIfNecessary();
 
@@ -82,6 +86,8 @@ public:
 		if (millis() - startupMillis < initialStartupDelaySeconds * 1e3) {
 			return;
 		}
+
+		reportGyroBiasProgress();
 
 		if (!fusion.getRestDetected() && currentStep->requiresRest()) {
 			if (isCalibrating) {
@@ -132,10 +138,25 @@ public:
 	}
 
 	void provideTempSample(float tempSample) {
+		// Kept whether or not a step is running, so the progress report below
+		// can say what the temperature is even while nothing is calibrating.
+		lastTempSample = tempSample;
+		haveTempSample = true;
+
 		if (isCalibrating) {
 			currentStep->processTempSample(tempSample);
 		}
 	}
+
+	/// The live calibration, which is newer than the copy the sensor loaded at
+	/// boot once any step has saved. Pair it with getCalibrationRevision().
+	const SlimeVR::Configuration::NonBlockingSensorConfig& getCalibration() const {
+		return sensorConfig;
+	}
+
+	/// Bumped every time calibration is saved, so a caller can tell when the
+	/// values above have changed without comparing the whole struct.
+	uint32_t getCalibrationRevision() const { return calibrationRevision; }
 
 private:
 	enum class CalibrationStepEnum {
@@ -224,7 +245,44 @@ private:
 		configuration.setSensor(sensorId, calibration);
 		configuration.save();
 
+		calibrationRevision++;
+
 		ledManager.blink(100);
+	}
+
+	// Says where gyro bias calibration has got to, every so often, so a run can
+	// be read afterwards and answer the question the numbers alone cannot: did
+	// this tracker ever collect a second point? Without one there is nothing to
+	// interpolate between and the bias correction is stuck at whatever
+	// temperature the first point was taken at.
+	void reportGyroBiasProgress() {
+		if (!haveTempSample || sensorConfig.gyroPointsCalibrated == 2) {
+			return;
+		}
+
+		if (millis() - lastGyroBiasReportMillis < gyroBiasReportSeconds * 1e3) {
+			return;
+		}
+		lastGyroBiasReportMillis = millis();
+
+		if (sensorConfig.gyroPointsCalibrated == 0) {
+			logger.info(
+				"Gyro bias: no points yet, %.1fC now - needs a stretch at rest",
+				lastTempSample
+			);
+			return;
+		}
+
+		float apart
+			= std::abs(lastTempSample - sensorConfig.gyroMeasurementTemperature1);
+		logger.info(
+			"Gyro bias: 1 point at %.1fC, %.1fC now (%.1fC apart, needs %.1fC) - no "
+			"temperature interpolation until a second point lands",
+			sensorConfig.gyroMeasurementTemperature1,
+			lastTempSample,
+			apart,
+			GyroBiasCalibrationStep<SensorRawT>::temperatureDifferenceNeeded()
+		);
 	}
 
 	enum class CalibrationPrintFlags {
@@ -280,6 +338,19 @@ private:
 					sensorConfig.G_off2[0],
 					sensorConfig.G_off2[1],
 					sensorConfig.G_off2[2]
+				);
+				logger.info(
+					"Gyro bias: 2 points, %.1fC to %.1fC - bias is interpolated to "
+					"the current temperature",
+					sensorConfig.gyroMeasurementTemperature1,
+					sensorConfig.gyroMeasurementTemperature2
+				);
+			} else if (sensorConfig.gyroPointsCalibrated == 1) {
+				logger.info(
+					"Gyro bias: 1 point only, at %.1fC - no interpolation, and a "
+					"second point needs a rest at least %.1fC away",
+					sensorConfig.gyroMeasurementTemperature1,
+					GyroBiasCalibrationStep<SensorRawT>::temperatureDifferenceNeeded()
 				);
 			}
 		}
@@ -337,6 +408,13 @@ private:
 	bool isCalibrating = false;
 	bool skippedAStep = false;
 	bool lastTickRest = false;
+
+	static constexpr float gyroBiasReportSeconds = 60;
+	uint64_t lastGyroBiasReportMillis = 0;
+	float lastTempSample = 0;
+	bool haveTempSample = false;
+
+	uint32_t calibrationRevision = 0;
 };
 
 }  // namespace SlimeVR::Sensors::NonBlockingCalibration
