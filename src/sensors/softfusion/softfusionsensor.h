@@ -23,7 +23,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <type_traits>
 #include <utility>
 
@@ -106,12 +108,140 @@ class SoftFusionSensor : public Sensor {
 
 	float zroChangeOverTemperature = 0;
 
+#if USE_NONBLOCKING_CALIBRATION
+	// The gyro bias to subtract right now, in raw counts. Two calibration
+	// points are two measurements of the same bias at two temperatures, so the
+	// bias at any temperature between them is the line through the two - and
+	// the gyro's zero really does move with temperature, which is the whole
+	// reason a second point is collected. Before this, G_off1 was always
+	// subtracted no matter how warm the tracker had got, which left the warm-up
+	// drift uncorrected and waiting for the fusion to re-learn the bias at rest
+	// - something a tracker in continuous use never gets the chance to do.
+	float gyroOffset[3]{0, 0, 0};
+	bool haveGyroOffsetTemperature = false;
+	uint32_t seenCalibrationRevision = 0;
+
+	// A line fitted to two points says nothing reliable far outside them, and a
+	// wild extrapolation would be worse than no correction at all, so the
+	// interpolation is allowed to run only half a span past either end.
+	static constexpr float gyroOffsetExtrapolation = 0.5f;
+	// Two points this close together are not a temperature span, and dividing
+	// by it would amplify their own measurement noise instead of the trend.
+	static constexpr float gyroOffsetMinimumSpan = 1.0f;
+
+	void updateGyroOffset() {
+		const float* coldest = m_calibration.G_off1;
+
+		if (m_calibration.gyroPointsCalibrated != 2 || !haveGyroOffsetTemperature) {
+			for (size_t i = 0; i < 3; i++) {
+				gyroOffset[i] = coldest[i];
+			}
+			return;
+		}
+
+		float span = m_calibration.gyroMeasurementTemperature2
+				   - m_calibration.gyroMeasurementTemperature1;
+		if (span < gyroOffsetMinimumSpan) {
+			for (size_t i = 0; i < 3; i++) {
+				gyroOffset[i] = coldest[i];
+			}
+			return;
+		}
+
+		float along
+			= (lastReadTemperature - m_calibration.gyroMeasurementTemperature1) / span;
+		along = std::min(
+			1.0f + gyroOffsetExtrapolation,
+			std::max(-gyroOffsetExtrapolation, along)
+		);
+
+		for (size_t i = 0; i < 3; i++) {
+			gyroOffset[i]
+				= coldest[i] + along * (m_calibration.G_off2[i] - coldest[i]);
+		}
+	}
+
+	uint8_t reportedGyroPoints = 0;
+
+	// Says, once, when a tracker crosses from one calibration point to two,
+	// with the slope it measured for itself. A tracker that never prints this
+	// line never had anything to interpolate between, whatever its drift
+	// numbers look like afterwards.
+	void reportGyroPointsIfChanged(
+		const SlimeVR::Configuration::NonBlockingSensorConfig& live
+	) {
+		if (live.gyroPointsCalibrated == reportedGyroPoints) {
+			return;
+		}
+		reportedGyroPoints = live.gyroPointsCalibrated;
+
+		if (live.gyroPointsCalibrated != 2) {
+			return;
+		}
+
+		float span = live.gyroMeasurementTemperature2
+				   - live.gyroMeasurementTemperature1;
+		if (span < gyroOffsetMinimumSpan) {
+			m_Logger.warn(
+				"Gyro bias has two points but only %.2fC apart, too close to "
+				"interpolate - still using the %.1fC point alone",
+				span,
+				live.gyroMeasurementTemperature1
+			);
+			return;
+		}
+
+		float worst = 0;
+		for (size_t i = 0; i < 3; i++) {
+			worst = std::max(worst, std::abs(live.G_off2[i] - live.G_off1[i]));
+		}
+
+		m_Logger.info(
+			"Gyro bias: second point landed, %.1fC to %.1fC, worst axis moves "
+			"%.4f deg/s per C - bias is now interpolated",
+			live.gyroMeasurementTemperature1,
+			live.gyroMeasurementTemperature2,
+			// GScale lands in rad/s; degrees are what every drift figure
+			// elsewhere is quoted in.
+			worst * GScale * (180.0 / PI) / span
+		);
+	}
+
+	// The sensor loaded its calibration at boot and the calibrator works on its
+	// own copy, so a point that lands mid-session would otherwise do nothing
+	// until the next reboot - which is exactly the case this is for, a tracker
+	// warming up on a body and collecting its warm point as it goes.
+	void refreshGyroCalibrationIfChanged() {
+		uint32_t revision = nonBlockingCalibrator.getCalibrationRevision();
+		if (revision == seenCalibrationRevision) {
+			return;
+		}
+		seenCalibrationRevision = revision;
+
+		const auto& live = nonBlockingCalibrator.getCalibration();
+		reportGyroPointsIfChanged(live);
+		m_calibration.gyroPointsCalibrated = live.gyroPointsCalibrated;
+		m_calibration.gyroMeasurementTemperature1 = live.gyroMeasurementTemperature1;
+		m_calibration.gyroMeasurementTemperature2 = live.gyroMeasurementTemperature2;
+		for (size_t i = 0; i < 3; i++) {
+			m_calibration.G_off1[i] = live.G_off1[i];
+			m_calibration.G_off2[i] = live.G_off2[i];
+		}
+	}
+#endif
+
 	void handleTemperatureMeasurement(float temperature, float timeStep) {
 #if USE_NONBLOCKING_CALIBRATION
 		nonBlockingCalibrator.provideTempSample(temperature);
 #endif
 
 		lastReadTemperature = temperature;
+
+#if USE_NONBLOCKING_CALIBRATION
+		haveGyroOffsetTemperature = true;
+		refreshGyroCalibrationIfChanged();
+		updateGyroOffset();
+#endif
 
 		temperatureSum += temperature * timeStep;
 		temperatureTimeSum += timeStep;
@@ -247,15 +377,18 @@ class SoftFusionSensor : public Sensor {
 			)
 		};
 #else
+		// gyroOffset is G_off1 interpolated towards G_off2 for the temperature
+		// the tracker is at now, recomputed whenever a temperature sample
+		// arrives so nothing here but a subtraction is in the hot path.
 		const sensor_real_t scaledData[] = {
 			static_cast<sensor_real_t>(
-				GScale * (static_cast<sensor_real_t>(xyz[0]) - m_calibration.G_off1[0])
+				GScale * (static_cast<sensor_real_t>(xyz[0]) - gyroOffset[0])
 			),
 			static_cast<sensor_real_t>(
-				GScale * (static_cast<sensor_real_t>(xyz[1]) - m_calibration.G_off1[1])
+				GScale * (static_cast<sensor_real_t>(xyz[1]) - gyroOffset[1])
 			),
 			static_cast<sensor_real_t>(
-				GScale * (static_cast<sensor_real_t>(xyz[2]) - m_calibration.G_off1[2])
+				GScale * (static_cast<sensor_real_t>(xyz[2]) - gyroOffset[2])
 			)
 		};
 #endif
@@ -469,6 +602,16 @@ public:
 		}
 
 		nonBlockingCalibrator.setup(m_calibration);
+
+		// No temperature has been read yet, so this just takes G_off1 - but it
+		// has to happen before the first gyro sample, which arrives before the
+		// first temperature sample does.
+		seenCalibrationRevision = nonBlockingCalibrator.getCalibrationRevision();
+		// The calibrator has already printed what was loaded, so this only
+		// records it, to keep the "second point landed" line below for an
+		// actual change rather than the state we booted into.
+		reportedGyroPoints = m_calibration.gyroPointsCalibrated;
+		updateGyroOffset();
 
 		if constexpr (DefinedTemperatureZROChange) {
 			zroChangeOverTemperature = imu::TemperatureZROChange;
