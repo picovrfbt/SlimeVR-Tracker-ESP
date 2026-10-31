@@ -127,6 +127,13 @@ public:
 	void updateBiasForgettingTime(float biasForgettingTime);
 
 	void updateRestDetectionParams(float restThGyr, float restThAcc);
+
+	/// The gyro bias the fusion has learned for itself, in rad/s - the same
+	/// units it takes gyro samples in, so this is what is left over after the
+	/// stored calibration offset was subtracted. Near zero means the stored
+	/// offset was right for the temperature the tracker is at. Returns the
+	/// fusion's own uncertainty in it.
+	float getBiasEstimate(sensor_real_t out[3]);
 #endif
 
 protected:

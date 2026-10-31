@@ -220,6 +220,15 @@ void SensorFusion::updateBiasForgettingTime(float biasForgettingTime) {
 void SensorFusion::updateRestDetectionParams(float restThGyr, float restThAcc) {
 	vqf.setRestDetectionThresholds(restThGyr, restThAcc);
 }
+
+float SensorFusion::getBiasEstimate(sensor_real_t out[3]) {
+	vqf_real_t bias[3]{0, 0, 0};
+	float sigma = vqf.getBiasEstimate(bias);
+	for (size_t i = 0; i < 3; i++) {
+		out[i] = static_cast<sensor_real_t>(bias[i]);
+	}
+	return sigma;
+}
 #endif
 }  // namespace Sensors
 }  // namespace SlimeVR

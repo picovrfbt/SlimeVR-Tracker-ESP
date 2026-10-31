@@ -985,6 +985,88 @@ public:
 
 	SensorStatus getSensorState() override final { return m_status; }
 
+	// `TCAL PRINT` over serial. The base class says "unsupported" here, which
+	// is no use for drift work: on a bench there is no server to read a data
+	// feed from, and a still tracker hides a wrong stored bias anyway, because
+	// the fusion re-learns it within seconds of being left alone. What does
+	// not hide is what the fusion had to learn - that is the leftover after
+	// the stored offset was subtracted, so near zero means the stored offset
+	// was right for the temperature the tracker is actually at.
+	void printTemperatureCalibrationState() override final {
+#if !USE_NONBLOCKING_CALIBRATION
+		m_Logger.info("Not built with non-blocking calibration");
+#else
+		// Arduino.h already has RAD_TO_DEG, hence the longer name.
+		static constexpr double RadPerSecToDegPerHour = (180.0 / PI) * 3600.0;
+
+		m_Logger.info(
+			"Gyro bias state: %d point(s), now %.2fC",
+			static_cast<int>(m_calibration.gyroPointsCalibrated),
+			lastReadTemperature
+		);
+
+		if (m_calibration.gyroPointsCalibrated == 0) {
+			m_Logger.info("  nothing stored yet, so nothing is being subtracted");
+			return;
+		}
+
+		m_Logger.info(
+			"  cold point %.2fC: %.4f %.4f %.4f counts",
+			m_calibration.gyroMeasurementTemperature1,
+			m_calibration.G_off1[0],
+			m_calibration.G_off1[1],
+			m_calibration.G_off1[2]
+		);
+		if (m_calibration.gyroPointsCalibrated == 2) {
+			m_Logger.info(
+				"  warm point %.2fC: %.4f %.4f %.4f counts",
+				m_calibration.gyroMeasurementTemperature2,
+				m_calibration.G_off2[0],
+				m_calibration.G_off2[1],
+				m_calibration.G_off2[2]
+			);
+		}
+
+		m_Logger.info(
+			"  subtracting:      %.4f %.4f %.4f counts",
+			gyroOffset[0],
+			gyroOffset[1],
+			gyroOffset[2]
+		);
+
+		// What the old behaviour would have cost: the gap between what is
+		// being subtracted now and the cold point that used to be subtracted
+		// always, whatever the temperature.
+		float worstGap = 0;
+		for (size_t i = 0; i < 3; i++) {
+			worstGap = std::max(
+				worstGap,
+				std::abs(gyroOffset[i] - m_calibration.G_off1[i])
+			);
+		}
+		m_Logger.info(
+			"  cold point alone would be %.4f counts = %.1f deg/h out on its "
+			"worst axis",
+			worstGap,
+			worstGap * GScale * RadPerSecToDegPerHour
+		);
+
+#if SENSOR_USE_VQF
+		sensor_real_t learned[3]{0, 0, 0};
+		float sigma = m_fusion.getBiasEstimate(learned);
+		m_Logger.info(
+			"  fusion has learned %.1f %.1f %.1f deg/h on top (sigma %.4f); "
+			"near zero means the stored offset was right",
+			learned[0] * RadPerSecToDegPerHour,
+			learned[1] * RadPerSecToDegPerHour,
+			learned[2] * RadPerSecToDegPerHour,
+			sigma
+		);
+#endif
+		m_Logger.info("  at rest: %s", m_fusion.getRestDetected() ? "yes" : "no");
+#endif
+	}
+
 	SensorFusionRestDetect m_fusion;
 	T<I2CImpl> m_sensor;
 #if USE_NONBLOCKING_CALIBRATION
