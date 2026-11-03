@@ -79,8 +79,16 @@ public:
 		SENSOR_CONFIG = 2,
 		// Add new flags here
 
+		// PicoVR: can be sent a firmware image over the air, packets 201-205.
+		// The server will not try unless this is set - firmware without the
+		// OTA code never answers those packets, so an update would sit there
+		// until it timed out. Those trackers are sent to the Flasher instead.
+		PICOVR_OTA = 30,
+
 		// PicoVR: understands PACKET_PICOVR_SET_LINK (Wi-Fi / Dongle / Auto).
 		// A high bit, so upstream flags added above never collide with it.
+		// Keep this last of the PicoVR bits: BITS_TOTAL follows it and decides
+		// how many bytes go on the wire, and the packet size should not move.
 		PICOVR_LINK = 31,
 
 		BITS_TOTAL,
@@ -91,7 +99,12 @@ public:
 		// EXAMPLE_FEATURE,
 		B64_WIFI_SCANNING,
 		SENSOR_CONFIG,
-		PICOVR_LINK
+		PICOVR_LINK,
+#if defined(ESP32)
+		// src/network/ota.cpp needs Update.h, which ESP8266 does not have, so
+		// only the ESP32 builds can honestly claim this one.
+		PICOVR_OTA,
+#endif
 		// Add enabled flags here
 	};
 
