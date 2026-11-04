@@ -38,16 +38,26 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
-      - name: Build tracker variants
-        run: pio run -e picovr_topaz -e picovr_topaz_bno
-
-      - name: Package
+      # Worked out before the build, not after it. The firmware bakes this in
+      # and reports it to the server, and the server compares it with the
+      # version in the manifest - so if the build does not know it, the two
+      # disagree and the app offers an update to a tracker that already has it.
+      - name: Work out the version
+        id: version
         run: |
           VERSION=""
           if [[ "$GITHUB_REF" == refs/tags/tracker-v* ]]; then
             VERSION="${GITHUB_REF_NAME#tracker-v}"
           fi
-          python scripts/package_tracker.py dist-tracker $VERSION
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build tracker variants
+        env:
+          FIRMWARE_VERSION: ${{ steps.version.outputs.version }}
+        run: pio run -e picovr_topaz -e picovr_topaz_bno
+
+      - name: Package
+        run: python scripts/package_tracker.py dist-tracker ${{ steps.version.outputs.version }}
 
       - uses: actions/upload-artifact@v4
         with:

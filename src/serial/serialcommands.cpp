@@ -324,6 +324,52 @@ void cmdGet(CmdParser* parser) {
 		}
 	}
 
+	// GET WIFI - the network this tracker is on, so the app can put it back
+	// after a flash.
+	//
+	// Flashing writes the whole chip and the credentials go with it, so the
+	// only way a tracker comes back on the network by itself is if something
+	// read them off it first. Nothing else could: the app only knew a network
+	// if the player had typed one into it, and anybody who set their trackers
+	// up through the web builder never did, so their trackers came back mute
+	// and had to be redone by hand.
+	//
+	// Base64 for both, matching SET BWIFI, so the pair survives spaces, quotes
+	// and anything else a network name is allowed to contain and round-trips
+	// byte for byte.
+	//
+	// This does put the password on the serial line in a recoverable form.
+	// That is the point - it is the only way back - but it means a serial log
+	// captured while this runs contains it, so whatever reads this should not
+	// write it down.
+	if (parser->equalCmdParam(1, "WIFI")) {
+		String ssid = WiFi.SSID();
+		String psk = WiFi.psk();
+
+		if (ssid.length() == 0) {
+			logger.info("[WIFI] NONE");
+			return;
+		}
+
+		unsigned char b64ssid[64];
+		unsigned char b64psk[128];
+		unsigned int ssidLen = encode_base64(
+			(unsigned char*)ssid.c_str(),
+			ssid.length(),
+			b64ssid
+		);
+		unsigned int pskLen = encode_base64(
+			(unsigned char*)psk.c_str(),
+			psk.length(),
+			b64psk
+		);
+		(void)ssidLen;
+		(void)pskLen;
+
+		logger.info("[WIFI] B64 %s %s", (char*)b64ssid, (char*)b64psk);
+		return;
+	}
+
 	if (parser->equalCmdParam(1, "WIFISCAN")) {
 		logger.info("[WSCAN] Scanning for WiFi networks...");
 
