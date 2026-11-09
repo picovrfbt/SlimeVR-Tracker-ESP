@@ -74,8 +74,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#dongle-v}"
+          # A draft, not published: the app shows these notes to players, so a person
+          # writes them first. Same reason as the tracker firmware workflow.
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "PicoVR Dongle $VERSION" \
             --latest=false \
-            --notes "PicoVR Dongle firmware $VERSION for the XIAO ESP32-C3. Flash picovr-dongle-esp32c3.bin at 0x0; the PicoVR app does this for you."
+            --draft \
+            --notes "Release notes go here before this is published. Players see them as written, in the app's update notice."

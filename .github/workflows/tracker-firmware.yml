@@ -82,8 +82,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#tracker-v}"
+          # A draft, not published. The app shows these notes to players in its
+          # update notice, so a person has to write them first - the old default
+          # ("each variant flashes at 0x0") went straight in front of players on
+          # 1.0.0 and 1.0.1.
           gh release create "$GITHUB_REF_NAME" dist-tracker/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "PicoVR Tracker firmware $VERSION" \
             --latest=false \
-            --notes "PicoVR tracker firmware $VERSION for PicoVR V3.1 boards (ESP32-C3). Each variant flashes at 0x0; the PicoVR app picks the right one and does this for you."
+            --draft \
+            --notes "Release notes go here before this is published. Players see them as written, in the app's update notice."
