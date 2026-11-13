@@ -83,6 +83,11 @@ struct LSM6DSV : LSM6DSOutputHandler<I2CImpl> {
 			static constexpr uint8_t value = 0x70;
 		};
 		static constexpr uint8_t OutTemp = 0x20;
+		struct IfCfg {
+			static constexpr uint8_t reg = 0x03;
+			// ASF_CTRL = 1: keep the I2C anti-spike filters on always
+			static constexpr uint8_t value = (1 << 5);
+		};
 		struct HAODRCFG {
 			static constexpr uint8_t reg = 0x62;
 			static constexpr uint8_t value = (0b00);  // 1st ODR table
@@ -178,6 +183,12 @@ struct LSM6DSV : LSM6DSOutputHandler<I2CImpl> {
 		// perform initialization step
 		i2c.writeReg(Regs::Ctrl3C::reg, Regs::Ctrl3C::valueSwReset);
 		delay(20);
+		// This chip also speaks I3C, and by default it switches its I2C spike
+		// filters off for good the first time it sees the I3C broadcast address
+		// 0x7E on the bus (datasheet 5.2.3) - which a full I2C scan sends. After
+		// that only a power cycle brings them back: IF_CFG survives the software
+		// reset above. We only ever use I2C, so keep the filters on.
+		i2c.writeReg(Regs::IfCfg::reg, Regs::IfCfg::value);
 		i2c.writeReg(Regs::HAODRCFG::reg, Regs::HAODRCFG::value);
 		i2c.writeReg(Regs::Ctrl1XLODR::reg, Regs::Ctrl1XLODR::value);
 		i2c.writeReg(Regs::Ctrl2GODR::reg, Regs::Ctrl2GODR::value);
