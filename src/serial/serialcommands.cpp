@@ -29,6 +29,7 @@
 #include "base64.hpp"
 #include "batterymonitor.h"
 #include "logging/Logger.h"
+#include "perfstats.h"
 #include "utils.h"
 
 #if ESP32
@@ -239,6 +240,59 @@ void printState() {
 	);
 }
 
+// What the tracker spent its time on since the last GET PERF (or boot), so a
+// slowdown can be pinned to one part of the loop on a real tracker.
+uint32_t perfWindowStartMillis = 0;
+
+void printPerf() {
+	const uint32_t now = millis();
+	const float seconds = (now - perfWindowStartMillis) / 1000.0f;
+	const uint32_t loops = PerfStats::loops > 0 ? PerfStats::loops : 1;
+	const float perSecond = seconds > 0 ? 1.0f / seconds : 0;
+
+	logger.info(
+		"Perf over %.1f s: %u loops (%.0f/s), loop avg %u us, worst loop %u us, "
+		"worst gap between loops %u us",
+		seconds,
+		static_cast<unsigned>(PerfStats::loops),
+		PerfStats::loops * perSecond,
+		static_cast<unsigned>(
+			(PerfStats::sections[0].totalMicros + PerfStats::sections[1].totalMicros
+			 + PerfStats::sections[2].totalMicros + PerfStats::sections[3].totalMicros
+			 + PerfStats::sections[4].totalMicros)
+			/ loops
+		),
+		static_cast<unsigned>(PerfStats::maxLoopMicros),
+		static_cast<unsigned>(PerfStats::maxGapMicros)
+	);
+	for (size_t i = 0; i < static_cast<size_t>(PerfStats::Section::Count); i++) {
+		const auto& stats = PerfStats::sections[i];
+		logger.info(
+			"  %-8s avg %5u us  worst %7u us  (%.1f%% of the time)",
+			PerfStats::name(static_cast<PerfStats::Section>(i)),
+			static_cast<unsigned>(stats.totalMicros / loops),
+			static_cast<unsigned>(stats.maxMicros),
+			seconds > 0 ? stats.totalMicros / (seconds * 1e4f) : 0
+		);
+	}
+	logger.info(
+		"  fusion   %.1f%% of the time; gyro %.0f/s, accel %.0f/s, rotation "
+		"packets %.0f/s",
+		seconds > 0 ? PerfStats::fusionMicros / (seconds * 1e4f) : 0,
+		PerfStats::gyroSamples * perSecond,
+		PerfStats::accelSamples * perSecond,
+		PerfStats::rotationPackets * perSecond
+	);
+	logger.info(
+		"  I2C read failures %u, FIFO overruns %u",
+		static_cast<unsigned>(PerfStats::i2cReadFailures),
+		static_cast<unsigned>(PerfStats::fifoOverruns)
+	);
+
+	PerfStats::reset();
+	perfWindowStartMillis = millis();
+}
+
 void cmdGet(CmdParser* parser) {
 	if (parser->getParamCount() < 2) {
 		return;
@@ -253,6 +307,10 @@ void cmdGet(CmdParser* parser) {
 
 	if (parser->equalCmdParam(1, "LINK")) {
 		networkManager.printLinkState();
+	}
+
+	if (parser->equalCmdParam(1, "PERF")) {
+		printPerf();
 	}
 
 	if (parser->equalCmdParam(1, "CONFIG")) {

@@ -30,7 +30,16 @@
 #include "globals.h"
 #include "logging/Logger.h"
 #include "ota.h"
+#include "perfstats.h"
 #include "serial/serialcommands.h"
+
+// Runs one step of the loop and books its time to a PerfStats section.
+#define TIMED(section, call)                                            \
+	do {                                                                \
+		const uint32_t timedStart = micros();                           \
+		call;                                                           \
+		PerfStats::add(PerfStats::Section::section, micros() - timedStart); \
+	} while (0)
 
 Timer<> globalTimer;
 SlimeVR::Logging::Logger logger("SlimeVR");
@@ -115,14 +124,28 @@ void setup() {
 	loopTime = micros();
 }
 
+uint32_t lastLoopStart = 0;
+
 void loop() {
+	const uint32_t loopStart = micros();
+	if (lastLoopStart != 0 && loopStart - lastLoopStart > PerfStats::maxGapMicros) {
+		PerfStats::maxGapMicros = loopStart - lastLoopStart;
+	}
+	lastLoopStart = loopStart;
+
 	globalTimer.tick();
-	SerialCommands::update();
+	TIMED(Console, SerialCommands::update());
 	OTA::otaUpdate();
-	networkManager.update();
-	sensorManager.update();
-	battery.Loop();
-	ledManager.update();
+	TIMED(Network, networkManager.update());
+	TIMED(Sensors, sensorManager.update());
+	TIMED(Battery, battery.Loop());
+	TIMED(Leds, ledManager.update());
+
+	PerfStats::loops++;
+	const uint32_t loopMicros = micros() - loopStart;
+	if (loopMicros > PerfStats::maxLoopMicros) {
+		PerfStats::maxLoopMicros = loopMicros;
+	}
 #ifdef TARGET_LOOPTIME_MICROS
 	long elapsed = (micros() - loopTime);
 	if (elapsed < TARGET_LOOPTIME_MICROS) {

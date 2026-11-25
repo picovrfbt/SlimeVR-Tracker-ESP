@@ -27,6 +27,8 @@
 #include <array>
 #include <cstdint>
 
+#include "perfstats.h"
+
 namespace SlimeVR::Sensors::SoftFusion::Drivers {
 
 template <typename I2CImpl>
@@ -76,9 +78,11 @@ struct LSM6DSOutputHandler {
 				sizeof(fifo_status),
 				reinterpret_cast<uint8_t*>(&fifo_status)
 			)) {
+			PerfStats::i2cReadFailures++;
 			return;
 		}
 		if (fifo_status & FIFO_OVERRUN_LATCHED_MASK) {
+			PerfStats::fifoOverruns++;
 			// FIFO overrun is expected to happen during startup and calibration.
 			// Said once and then every hundredth time: printing it on every poll
 			// slowed the loop down and made the next overrun more likely.
@@ -105,6 +109,7 @@ struct LSM6DSOutputHandler {
 			);
 			const size_t bytes_to_read = entries * FullFifoEntrySize;
 			if (!i2c.readBytes(Regs::FifoData, bytes_to_read, read_buffer.data())) {
+				PerfStats::i2cReadFailures++;
 				return;
 			}
 			available_entries -= entries;

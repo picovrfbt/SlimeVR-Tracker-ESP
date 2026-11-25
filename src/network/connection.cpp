@@ -30,6 +30,7 @@
 #include "GlobalVars.h"
 #include "logging/Logger.h"
 #include "packets.h"
+#include "perfstats.h"
 
 #define TIMEOUT 3000UL
 
@@ -349,6 +350,7 @@ void Connection::sendRotationData(
 	MUST(sendByte(accuracyInfo));
 
 	MUST(endPacket());
+	PerfStats::rotationPackets++;
 }
 
 // PACKET_MAGNETOMETER_ACCURACY 18

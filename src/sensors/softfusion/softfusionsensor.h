@@ -29,6 +29,7 @@
 #include <utility>
 
 #include "../SensorFusionRestDetect.h"
+#include "perfstats.h"
 #include "sensorwatchdog.h"
 #include "../nonblockingcalibration/NonBlockingCalibration.h"
 #include "../sensor.h"
@@ -231,7 +232,10 @@ class SoftFusionSensor : public Sensor {
 		accelData[2] = accelData[2] * AScale - m_calibration.A_off[2];
 #endif
 
+		const uint32_t fusionStart = micros();
 		m_fusion.updateAcc(accelData, m_calibration.A_Ts);
+		PerfStats::fusionMicros += micros() - fusionStart;
+		PerfStats::accelSamples++;
 
 #if USE_NONBLOCKING_CALIBRATION
 		m_lastAccelSampleMillis = millis();
@@ -267,7 +271,10 @@ class SoftFusionSensor : public Sensor {
 #endif
 		m_gyroFrozen.sample(xyz, millis());
 
+		const uint32_t fusionStart = micros();
 		m_fusion.updateGyro(scaledData, m_calibration.G_Ts);
+		PerfStats::fusionMicros += micros() - fusionStart;
+		PerfStats::gyroSamples++;
 
 #if USE_NONBLOCKING_CALIBRATION
 		nonBlockingCalibrator.provideGyroSample(xyz);
