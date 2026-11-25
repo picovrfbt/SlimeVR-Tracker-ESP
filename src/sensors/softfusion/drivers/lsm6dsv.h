@@ -26,7 +26,6 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstdio>
 
 #include "lsm6ds-common.h"
 
@@ -123,53 +122,6 @@ struct LSM6DSV : LSM6DSOutputHandler<I2CImpl> {
 		static constexpr uint8_t FifoStatus = 0x1b;
 		static constexpr uint8_t FifoData = 0x78;
 	};
-
-	/**
-	 * Registers worth reading back when the sensor has stopped answering.
-	 *
-	 * Between them they say whether the gyroscope was powered down (ctrl2),
-	 * whether it is still being batched into the FIFO (fifoctrl3), whether the
-	 * chip decided by itself that it was idle and went to sleep (wake, fn),
-	 * whether any data is ready at all (status), and whether the FIFO overran
-	 * (fifost2). Addresses checked against ST's own lsm6dsv driver.
-	 */
-	struct DiagRegs {
-		static constexpr uint8_t FifoCtrl3 = 0x09;
-		static constexpr uint8_t FifoCtrl4 = 0x0a;
-		static constexpr uint8_t WhoAmI = 0x0f;
-		static constexpr uint8_t Ctrl1 = 0x10;
-		static constexpr uint8_t Ctrl2 = 0x11;
-		static constexpr uint8_t FifoStatus2 = 0x1c;
-		static constexpr uint8_t StatusReg = 0x1e;
-		static constexpr uint8_t WakeUpSrc = 0x45;
-		static constexpr uint8_t FunctionsEnable = 0x50;
-	};
-
-	/**
-	 * Writes what the chip currently says about itself into `out`.
-	 *
-	 * This is the whole point of the exercise: a tracker that has gone quiet
-	 * on somebody's leg can put this line in their server's log, and it says
-	 * which of the possibilities actually happened instead of leaving it to
-	 * be guessed at from the outside.
-	 */
-	void describeState(char* out, size_t length) {
-		std::snprintf(
-			out,
-			length,
-			"who=%02x c1=%02x c2=%02x f3=%02x f4=%02x st=%02x fs2=%02x wk=%02x "
-			"fn=%02x",
-			i2c.readReg(DiagRegs::WhoAmI),
-			i2c.readReg(DiagRegs::Ctrl1),
-			i2c.readReg(DiagRegs::Ctrl2),
-			i2c.readReg(DiagRegs::FifoCtrl3),
-			i2c.readReg(DiagRegs::FifoCtrl4),
-			i2c.readReg(DiagRegs::StatusReg),
-			i2c.readReg(DiagRegs::FifoStatus2),
-			i2c.readReg(DiagRegs::WakeUpSrc),
-			i2c.readReg(DiagRegs::FunctionsEnable)
-		);
-	}
 
 	LSM6DSV(I2CImpl i2c, SlimeVR::Logging::Logger& logger)
 		: LSM6DSOutputHandler<I2CImpl>(i2c, logger) {}
