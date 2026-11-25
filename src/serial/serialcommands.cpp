@@ -61,6 +61,40 @@ bool lengthCheck(
 	return true;
 }
 
+// Hex text to bytes. Accepts "34B4721A0CE8" or "34:B4:72:1A:0C:E8".
+bool parseHex(const char* text, uint8_t* out, size_t length) {
+	if (text == nullptr) {
+		return false;
+	}
+	size_t count = 0;
+	int high = -1;
+	for (const char* c = text; *c != '\0'; c++) {
+		if (*c == ':' || *c == '-') {
+			continue;
+		}
+		int value;
+		if (*c >= '0' && *c <= '9') {
+			value = *c - '0';
+		} else if (*c >= 'a' && *c <= 'f') {
+			value = *c - 'a' + 10;
+		} else if (*c >= 'A' && *c <= 'F') {
+			value = *c - 'A' + 10;
+		} else {
+			return false;
+		}
+		if (high < 0) {
+			high = value;
+		} else {
+			if (count >= length) {
+				return false;
+			}
+			out[count++] = (high << 4) | value;
+			high = -1;
+		}
+	}
+	return count == length && high < 0;
+}
+
 unsigned int
 decode_base64_length_null(const char* const b64char, unsigned int* b64ssidlength) {
 	if (b64char == NULL) {
@@ -85,6 +119,7 @@ void cmdSet(CmdParser* parser) {
 					return;
 				}
 
+				networkManager.useWifi();
 				WiFiNetwork::setWiFiCredentials(sc_ssid, sc_pw);
 				logger.info("CMD SET WIFI OK: New wifi credentials set, reconnecting");
 			}
@@ -131,8 +166,38 @@ void cmdSet(CmdParser* parser) {
 					// set the pointer for pass to null for no password
 					ppass = NULL;
 				}
+				networkManager.useWifi();
 				WiFiNetwork::setWiFiCredentials(ssid, ppass);
 				logger.info("CMD SET BWIFI OK: New wifi credentials set, reconnecting");
+			}
+		} else if (parser->equalCmdParam(1, "DONGLE")) {
+			// SET DONGLE <dongle address> <channel> <32 hex digit pairing key>
+			uint8_t mac[6];
+			uint8_t key[PicoLink::KEY_SIZE];
+			int channel = parser->getParamCount() >= 5 ? atoi(parser->getCmdParam(3)) : 0;
+			if (parser->getParamCount() < 5 || !parseHex(parser->getCmdParam(2), mac, 6)
+				|| !PicoLink::isValidChannel(channel)
+				|| !parseHex(parser->getCmdParam(4), key, sizeof(key))) {
+				logger.error("CMD SET DONGLE ERROR: Invalid arguments");
+				logger.info("Syntax: SET DONGLE <ADDRESS> <CHANNEL 1-13> <KEY 32 HEX>");
+			} else if (networkManager.bindDongle(mac, channel, key)) {
+				logger.info("CMD SET DONGLE OK: Bound to the dongle, mode AUTO");
+			} else {
+				logger.error("CMD SET DONGLE ERROR: Could not start the dongle radio");
+			}
+		} else if (parser->equalCmdParam(1, "MODE")) {
+			// SET MODE WIFI | DONGLE | AUTO
+			SlimeVR::Network::LinkMode mode;
+			if (!SlimeVR::Network::LinkConfig::parseMode(parser->getCmdParam(2), mode)) {
+				logger.error("CMD SET MODE ERROR: Unknown mode");
+				logger.info("Syntax: SET MODE <WIFI|DONGLE|AUTO>");
+			} else if (networkManager.setMode(mode)) {
+				logger.info(
+					"CMD SET MODE OK: %s",
+					SlimeVR::Network::LinkConfig::modeName(mode)
+				);
+			} else {
+				logger.error("CMD SET MODE ERROR: No dongle bound, use SET DONGLE first");
 			}
 		} else {
 			logger.error("CMD SET ERROR: Unrecognized variable to set");
@@ -146,7 +211,7 @@ void printState() {
 	logger.info(
 		"SlimeVR Tracker, board: %d, hardware: %d, protocol: %d, firmware: %s, "
 		"address: "
-		"%s, mac: %s, status: %d, wifi state: %d",
+		"%s, mac: %s, status: %d, wifi state: %d, link: %s",
 		BOARD,
 		HARDWARE_MCU,
 		PROTOCOL_VERSION,
@@ -154,7 +219,8 @@ void printState() {
 		WiFiNetwork::getAddress().toString().c_str(),
 		WiFi.macAddress().c_str(),
 		statusManager.getStatus(),
-		WiFiNetwork::getWiFiState()
+		WiFiNetwork::getWiFiState(),
+		networkManager.isDongleActive() ? "DONGLE" : "WIFI"
 	);
 	for (auto& sensor : sensorManager.getSensors()) {
 		logger.info(
@@ -183,6 +249,10 @@ void cmdGet(CmdParser* parser) {
 
 		// We don't want to print this on every timed state output
 		logger.info("Git commit: %s", GIT_REV);
+	}
+
+	if (parser->equalCmdParam(1, "LINK")) {
+		networkManager.printLinkState();
 	}
 
 	if (parser->equalCmdParam(1, "CONFIG")) {
@@ -252,6 +322,52 @@ void cmdGet(CmdParser* parser) {
 		} else {
 			logger.info("[TEST] Sensor[0] sent some data, looks working.");
 		}
+	}
+
+	// GET WIFI - the network this tracker is on, so the app can put it back
+	// after a flash.
+	//
+	// Flashing writes the whole chip and the credentials go with it, so the
+	// only way a tracker comes back on the network by itself is if something
+	// read them off it first. Nothing else could: the app only knew a network
+	// if the player had typed one into it, and anybody who set their trackers
+	// up through the web builder never did, so their trackers came back mute
+	// and had to be redone by hand.
+	//
+	// Base64 for both, matching SET BWIFI, so the pair survives spaces, quotes
+	// and anything else a network name is allowed to contain and round-trips
+	// byte for byte.
+	//
+	// This does put the password on the serial line in a recoverable form.
+	// That is the point - it is the only way back - but it means a serial log
+	// captured while this runs contains it, so whatever reads this should not
+	// write it down.
+	if (parser->equalCmdParam(1, "WIFI")) {
+		String ssid = WiFi.SSID();
+		String psk = WiFi.psk();
+
+		if (ssid.length() == 0) {
+			logger.info("[WIFI] NONE");
+			return;
+		}
+
+		unsigned char b64ssid[64];
+		unsigned char b64psk[128];
+		unsigned int ssidLen = encode_base64(
+			(unsigned char*)ssid.c_str(),
+			ssid.length(),
+			b64ssid
+		);
+		unsigned int pskLen = encode_base64(
+			(unsigned char*)psk.c_str(),
+			psk.length(),
+			b64psk
+		);
+		(void)ssidLen;
+		(void)pskLen;
+
+		logger.info("[WIFI] B64 %s %s", (char*)b64ssid, (char*)b64psk);
+		return;
 	}
 
 	if (parser->equalCmdParam(1, "WIFISCAN")) {

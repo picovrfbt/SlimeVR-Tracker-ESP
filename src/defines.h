@@ -25,6 +25,10 @@
 // https://docs.slimevr.dev/firmware/configuring-project.html#2-configuring-definesh
 // ================================================
 
+#ifdef PICOVR_TOPAZ
+#include "defines_picovr_topaz.h"
+#else
+
 // Set parameters of IMU and board used
 #define IMU IMU_BNO085
 #define SECOND_IMU IMU
@@ -228,3 +232,5 @@ PIN_IMU_SDA, PRIMARY_IMU_OPTIONAL, BMI160_QMC_REMAP) \
 #define BATTERY_SHIELD_R2 100
 #endif
 #endif
+
+#endif  // PICOVR_TOPAZ

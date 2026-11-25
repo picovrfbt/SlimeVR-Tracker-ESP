@@ -36,6 +36,10 @@ void upkeep();
 void setWiFiCredentials(const char* SSID, const char* pass);
 IPAddress getAddress();
 uint8_t getWiFiState();
+// Drop the Wi-Fi connection but keep the saved network (for the PicoVR Dongle).
+void stop();
+// Whether a Wi-Fi network is saved to fall back to.
+bool hasSavedCredentials();
 }  // namespace WiFiNetwork
 
 /** Wifi Reconnection Statuses **/

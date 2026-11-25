@@ -24,12 +24,12 @@
 #define SLIMEVR_NETWORK_CONNECTION_H_
 
 #include <Arduino.h>
-#include <WiFiUdp.h>
 
 #include "featureflags.h"
 #include "globals.h"
 #include "quat.h"
 #include "sensors/sensor.h"
+#include "transport.h"
 #include "wifihandler.h"
 
 namespace SlimeVR {
@@ -37,15 +37,9 @@ namespace Network {
 
 class Connection {
 public:
-	Connection() {
-#ifdef SERVER_IP
-		m_ServerHost.fromString(SERVER_IP);
-#endif
-
-#ifdef SERVER_PORT
-		m_ServerPort = SERVER_PORT;
-#endif
-	}
+	// Wi-Fi/UDP or the PicoVR Dongle. Switching drops the server connection, so
+	// the next update starts a fresh handshake over the new link.
+	void setTransport(Transport* transport);
 
 	void searchForServer();
 	void update();
@@ -63,6 +57,7 @@ public:
 
 	// PACKET_ERROR 14
 	void sendSensorError(uint8_t sensorId, uint8_t error);
+	void sendSerialMessage(const char* message);
 
 	// PACKET_ROTATION_DATA 17
 	void sendRotationData(
@@ -83,6 +78,9 @@ public:
 
 	// PACKET_FEATURE_FLAGS 22
 	void sendFeatureFlags();
+
+	// Where this tracker is up to in an update, so the server knows what to send.
+	void sendOtaStatus();
 
 #if ENABLE_INSPECTION
 	void sendInspectionRawIMUData(
@@ -161,12 +159,17 @@ private:
 	bool m_Connected = false;
 	SlimeVR::Logging::Logger m_Logger = SlimeVR::Logging::Logger("UDPConnection");
 
-	WiFiUDP m_UDP;
-	unsigned char m_Packet[128];  // buffer for incoming packets
+	Transport* m_Transport = nullptr;
+	// Big enough for a firmware chunk: the dongle's frame is the limit at 244
+	// bytes, and a packet carries 12 bytes of header before its payload.
+	unsigned char m_Packet[260];  // buffer for incoming packets
+
+	// How often a tracker reports its progress during an update: often enough
+	// that a lost chunk is noticed quickly, rarely enough not to flood the link.
+	static constexpr uint8_t OTA_STATUS_EVERY_CHUNKS = 16;
+	uint8_t m_OtaChunksSinceStatus = 0;
 	uint64_t m_PacketNumber = 0;
 
-	int m_ServerPort = 6969;
-	IPAddress m_ServerHost = IPAddress(255, 255, 255, 255);
 	unsigned long m_LastConnectionAttemptTimestamp;
 	unsigned long m_LastPacketTimestamp;
 
