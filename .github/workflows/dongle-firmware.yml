@@ -6,7 +6,8 @@ name: PicoVR Dongle firmware
 
 on:
   push:
-    branches: [picovr-dongle]
+    # MBE-Thing is what the web flasher builds for customers.
+    branches: [MBE-Thing]
     tags: ['dongle-v*']
   pull_request:
   workflow_dispatch:

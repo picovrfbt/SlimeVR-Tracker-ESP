@@ -6,7 +6,8 @@ name: PicoVR tracker firmware
 
 on:
   push:
-    branches: [picovr-dongle]
+    # MBE-Thing is what the web flasher builds for customers.
+    branches: [MBE-Thing]
     tags: ['tracker-v*']
   pull_request:
   workflow_dispatch:
@@ -19,6 +20,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The sensor driver, the watchdog and the bus handling, run on a PC against
+  # a fake LSM6DSV. Fast, and catches a broken recovery before any tracker does.
+  native-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run the native sensor test
+        run: |
+          g++ -std=c++20 -Wall -I src -o sensor_test test/native/sensorwatchdog_test.cpp
+          ./sensor_test
+
   build:
     runs-on: ubuntu-24.04
     steps:
@@ -55,6 +67,16 @@ jobs:
         env:
           FIRMWARE_VERSION: ${{ steps.version.outputs.version }}
         run: pio run -e picovr_topaz -e picovr_topaz_bno
+
+      # What customers actually get: the web flasher writes its own defines.h
+      # and runs this env from platformio-tools.ini. PICOVR_TOPAZ selects the
+      # same board and LSM6DSV settings, so this is the closest thing to the
+      # flasher's build that CI can make. Nothing reaches MBE-Thing unless this
+      # builds.
+      - name: Build the way the web flasher does
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DPICOVR_TOPAZ
+        run: pio run -c platformio-tools.ini -e BOARD_TOPAZESTROGEN
 
       - name: Package
         run: python scripts/package_tracker.py dist-tracker ${{ steps.version.outputs.version }}
