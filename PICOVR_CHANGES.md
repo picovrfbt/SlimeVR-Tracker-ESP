@@ -81,6 +81,14 @@ moved. Built as the web flasher does (`BOARD_TOPAZESTROGEN` with
 Not tested: a cold start (tracker off, then on) and a tracker that is moving
 or worn. The owner chose to skip both (25 Nov).
 
+Bus fault test (25 Nov), for the customer's hip "fixed by a restart" report.
+Local branches `test/bus-fault` and `test/bus-fault-old` add `GET BUSFAULT`
+(TEST ONLY, never ship): it cuts a read off so the IMU holds SDA low, then
+restarts Wire without clearing the bus. Five faults on `c217d06` and on
+`fix/i2c-bus`: each cost one failed read (`Error -1`), the bus cleared itself,
+and the rotation of a still tracker did not move. So a stuck bus of this kind
+is not what needs the restart; the cause is still unknown.
+
 Seen while setting up, not changed:
 - `SET WIFI` stalls the loop for about 2.2 s (it saves the network and stops
   the dongle radio), which overran the FIFO twice. One-time, while the
