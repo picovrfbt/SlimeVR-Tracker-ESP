@@ -25,6 +25,8 @@
 
 #include "ota.h"
 
+#include <cstring>
+
 #include "GlobalVars.h"
 #include "logging/Logger.h"
 #include "packets.h"
@@ -277,6 +279,31 @@ void Connection::sendSensorError(uint8_t sensorId, uint8_t error) {
 	MUST(sendPacketNumber());
 	MUST(sendByte(sensorId));
 	MUST(sendByte(error));
+
+	MUST(endPacket());
+}
+
+/**
+ * PACKET_SERIAL 11: a line of text for the server's log.
+ *
+ * The tracker's own log only goes out of the USB socket, which is no use for
+ * a tracker on somebody's leg in another country. Every SlimeVR-descended
+ * server prints this packet straight into its log file, so this is how a
+ * tracker says what went wrong where the owner can find it and send it on.
+ * Keep the messages short and rare: this is for faults, not for chatter.
+ */
+void Connection::sendSerialMessage(const char* message) {
+	MUST(m_Connected);
+
+	const size_t length = strlen(message);
+	MUST(length > 0 && length <= 180);
+
+	MUST(beginPacket());
+
+	MUST(sendPacketType(PACKET_SERIAL));
+	MUST(sendPacketNumber());
+	MUST(sendInt(static_cast<uint32_t>(length)));
+	MUST(sendBytes(reinterpret_cast<const uint8_t*>(message), length));
 
 	MUST(endPacket());
 }

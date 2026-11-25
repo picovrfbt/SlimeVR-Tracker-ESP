@@ -65,6 +65,18 @@
 #define PACKET_PICOVR_OTA_ABORT 204
 #define PACKET_PICOVR_OTA_STATUS 205
 
+// Reason a sensor reported an error, sent with PACKET_ERROR. Taken from the
+// SH-2 interface the BNO08x use, so the numbers match what the server already
+// understands.
+enum class PacketErrorCode : uint8_t {
+	NOT_APPLICABLE = 0,
+	POWER_ON_RESET = 1,
+	INTERNAL_SYSTEM_RESET = 2,
+	WATCHDOG_TIMEOUT = 3,
+	EXTERNAL_RESET = 4,
+	OTHER = 5,
+};
+
 #define PACKET_INSPECTION 105  // 0x69
 
 #define PACKET_RECEIVE_HEARTBEAT 1

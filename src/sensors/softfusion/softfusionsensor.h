@@ -24,10 +24,12 @@
 #pragma once
 
 #include <array>
+#include <cstdio>
 #include <type_traits>
 #include <utility>
 
 #include "../SensorFusionRestDetect.h"
+#include "sensorwatchdog.h"
 #include "../nonblockingcalibration/NonBlockingCalibration.h"
 #include "../sensor.h"
 #include "GlobalVars.h"
@@ -72,6 +74,9 @@ class SoftFusionSensor : public Sensor {
 	static constexpr bool OnlyDirectTemperature = requires(imu i) {
 		{ i.getDirectTemp() } -> std::same_as<float>;
 	};
+
+	static constexpr bool HasStateDescription
+		= requires(imu& i, char* out, size_t length) { i.describeState(out, length); };
 
 	static constexpr bool DefinedTemperatureZROChange = requires(imu i) {
 		{ imu::TemperatureZROChange } -> std::same_as<float>;
@@ -229,6 +234,7 @@ class SoftFusionSensor : public Sensor {
 		m_fusion.updateAcc(accelData, m_calibration.A_Ts);
 
 #if USE_NONBLOCKING_CALIBRATION
+		m_lastAccelSampleMillis = millis();
 		nonBlockingCalibrator.provideAccelSample(xyz);
 #endif
 	}
@@ -259,6 +265,8 @@ class SoftFusionSensor : public Sensor {
 			)
 		};
 #endif
+		m_gyroFrozen.sample(xyz, millis());
+
 		m_fusion.updateGyro(scaledData, m_calibration.G_Ts);
 
 #if USE_NONBLOCKING_CALIBRATION
@@ -363,6 +371,127 @@ public:
 	}
 	~SoftFusionSensor() {}
 
+	/// Configures the IMU itself. Used at start-up and again if it stops.
+	bool initialiseHardware() {
+		if constexpr (HasMotionlessCalib) {
+			typename imu::MotionlessCalibrationData calibData;
+			std::memcpy(&calibData, m_calibration.MotionlessData, sizeof(calibData));
+			return m_sensor.initialize(calibData);
+		} else {
+			return m_sensor.initialize();
+		}
+	}
+
+	/**
+	 * Notices when the IMU has stopped handing over samples, and tries to get
+	 * it going again.
+	 *
+	 * Without this a dead IMU is completely silent. The fusion simply stops
+	 * being updated, so the rotation never changes; the change check then
+	 * decides there is nothing worth sending, and the tracker says nothing
+	 * more about rotation for the rest of the session. Everything else carries
+	 * on - it answers the server's pings, reports its battery and its signal -
+	 * so the app shows it connected, on a good link, with a full battery, and
+	 * a pose frozen at whatever it was doing when the sensor went. There is
+	 * nothing in the app or in any log to say what happened.
+	 *
+	 * So: say so, to the log and to the server, and then try to bring the
+	 * sensor back by configuring it from scratch, which resets it first.
+	 *
+	 * The two halves of one of these chips can stop separately - a customer
+	 * saw the gyroscope stop while the accelerometer carried on - so the
+	 * message says which. That is the difference between a wedged bus and a
+	 * gyroscope that has stopped on a bus which is plainly still working, and
+	 * it is not worth guessing at afterwards.
+	 *
+	 * The bus is deliberately not cleared here. Clearing it leaves the pins as
+	 * tri-state inputs and only SensorManager knows how to bring the bus back
+	 * up, so doing it here would take the accelerometer down with it in the
+	 * very case where the accelerometer is the half still working.
+	 *
+	 * The detection is upstream SlimeVR's (PR #376), which this fork predates.
+	 * Two differences: it is said once per outage rather than on every poll,
+	 * which would be 160 error packets a second at this poll rate, and a
+	 * recovery is attempted rather than only reporting.
+	 */
+	void checkSensorTimeout(const char* reason) {
+		const uint32_t now = millis();
+		switch (m_watchdog.polled(now)) {
+			case SensorWatchdog::Action::Nothing:
+				return;
+
+			case SensorWatchdog::Action::Stopped: {
+				working = false;
+				m_status = SensorStatus::SENSOR_ERROR;
+				reportStopped(now, reason);
+				break;
+			}
+
+			case SensorWatchdog::Action::Retry:
+				break;
+
+			case SensorWatchdog::Action::Recovered:
+				// polled() never reports this; reading() does.
+				return;
+		}
+
+		if (initialiseHardware()) {
+			m_Logger.info("Sensor 0x%02x configured again, waiting for data", addr);
+		} else {
+			m_Logger.error("Sensor 0x%02x did not answer, will try again", addr);
+		}
+	}
+
+	/**
+	 * Says the sensor has stopped, and why, as far as the chip will admit.
+	 *
+	 * The line goes to the server as well as the log, because the log only
+	 * leaves by the USB socket and the trackers that matter are on somebody
+	 * else's legs. Every SlimeVR-descended server writes it into its log
+	 * file, so the owner can send it on.
+	 */
+	void reportStopped(uint32_t now, const char* reason) {
+		const bool accelAlive
+			= m_lastAccelSampleMillis != 0
+		   && now - m_lastAccelSampleMillis < SensorWatchdog::stoppedAfterMillis;
+
+		char registers[112] = "";
+		if constexpr (HasStateDescription) {
+			m_sensor.describeState(registers, sizeof(registers));
+		}
+
+		char line[190];
+		std::snprintf(
+			line,
+			sizeof(line),
+			"Gyroscope stopped (%s) on 0x%02x after %ums, accel=%s %s",
+			reason,
+			addr,
+			static_cast<unsigned>(m_watchdog.sinceReading(now)),
+			accelAlive ? "ok" : "stopped",
+			registers
+		);
+
+		m_Logger.error("%s. Configuring the sensor again.", line);
+		networkConnection.sendSerialMessage(line);
+		networkConnection.sendSensorError(
+			sensorId,
+			static_cast<uint8_t>(PacketErrorCode::WATCHDOG_TIMEOUT)
+		);
+	}
+
+	/// A reading arrived, so the sensor is alive; says so if it had stopped.
+	void noteSensorAlive() {
+		if (m_watchdog.reading(millis()) != SensorWatchdog::Action::Recovered) {
+			return;
+		}
+		working = true;
+		m_status = SensorStatus::SENSOR_OK;
+		// The connection re-sends sensor info whenever this state changes, so
+		// the server takes the tracker out of error and uses it again.
+		m_Logger.info("Sensor 0x%02x is sending data again", addr);
+	}
+
 	void motionLoop() override final {
 		sendTempIfNeeded();
 
@@ -389,7 +518,16 @@ public:
 			);
 			optimistic_yield(100);
 			if (!m_fusion.isUpdated()) {
+				checkSensorTimeout("no data");
 				return;
+			}
+			// Readings that never change are not readings, so they go the same
+			// way as none at all: the watchdog times out, reports, and paces
+			// the retries. Nothing special is needed for them.
+			if (m_gyroFrozen.frozen(millis())) {
+				checkSensorTimeout("stuck");
+			} else {
+				noteSensorAlive();
 			}
 			hadData = true;
 			m_fusion.clearUpdated();
@@ -493,13 +631,7 @@ public:
 
 		bool initResult = false;
 
-		if constexpr (HasMotionlessCalib) {
-			typename imu::MotionlessCalibrationData calibData;
-			std::memcpy(&calibData, m_calibration.MotionlessData, sizeof(calibData));
-			initResult = m_sensor.initialize(calibData);
-		} else {
-			initResult = m_sensor.initialize();
-		}
+		initResult = initialiseHardware();
 
 		if (!initResult) {
 			m_Logger.error("Sensor failed to initialize!");
@@ -509,6 +641,8 @@ public:
 
 		m_status = SensorStatus::SENSOR_OK;
 		working = true;
+		m_watchdog.start(millis());
+		m_gyroFrozen.start(millis());
 
 #if !USE_NONBLOCKING_CALIBRATION
 		[[maybe_unused]] auto lastRawSample = eatSamplesReturnLast(1000);
@@ -905,6 +1039,11 @@ public:
 #endif
 
 	SensorStatus m_status = SensorStatus::SENSOR_OFFLINE;
+
+	SensorWatchdog m_watchdog;
+	uint32_t m_lastAccelSampleMillis = 0;
+	FrozenReadingDetector<RawSensorT> m_gyroFrozen;
+
 	uint32_t m_lastPollTime = micros();
 	uint32_t m_lastRotationPacketSent = 0;
 	uint32_t m_lastTemperaturePacketSent = 0;

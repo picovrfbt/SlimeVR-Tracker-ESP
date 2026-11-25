@@ -57,6 +57,7 @@ public:
 
 	// PACKET_ERROR 14
 	void sendSensorError(uint8_t sensorId, uint8_t error);
+	void sendSerialMessage(const char* message);
 
 	// PACKET_ROTATION_DATA 17
 	void sendRotationData(
