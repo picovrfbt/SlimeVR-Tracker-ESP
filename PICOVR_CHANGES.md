@@ -52,7 +52,12 @@ These exist because each one was broken once, and a customer paid for it (see
 | `33f225d` | 24 Nov | Restored all files to `16c5b36` | Superseded by the next |
 | `ecce373` | 24 Nov | Undid `33f225d`: files back to `c217d06` | Same files as `c217d06` |
 
-## On local branch `fix/i2c-bus` only (not on MBE-Thing)
+## Added to MBE-Thing on 25 Nov 2026 (from `fix/i2c-bus`, owner said yes)
+
+No change to what the tracker sends a server: the only network change is a
+counter for `GET PERF`. Same protocol (18) as `c217d06`, and it ran 31 min
+with stock SlimeVR Server v0.17.0. Native test 39/39, `picovr_topaz`,
+`picovr_topaz_bno` and the web flasher build all pass.
 
 | Commit | Change |
 |---|---|
