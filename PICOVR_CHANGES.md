@@ -76,8 +76,17 @@ moved. Built as the web flasher does (`BOARD_TOPAZESTROGEN` with
 | `fix/i2c-bus`, USB only, no server | 35 min | Gyro 480/s and accel 240/s every minute. 0 I2C failures, 0 FIFO overruns. Rotation kept updating. Worst loop gap 7-9 ms, once 13 ms (FIFO holds about 0.8 s). |
 | `fix/i2c-bus` through PicoVR Dongle 1.1.0 to PicoVR Server | 31 min | Connected in 5 s, followed the server's channel change 11 to 12 by itself. 0 failures, 0 overruns, 0 packets lost, signal -42 dBm throughout, no disconnects. One 0.1 s pause when switching from Wi-Fi to the dongle. |
 
-Not tested yet: a cold start (tracker off, then on), Wi-Fi, stock SlimeVR
-Server, and a tracker that is moving or worn.
+| `fix/i2c-bus` on home Wi-Fi to stock SlimeVR Server v0.17.0 | 31 min | Connected the whole time. 0 failures, 0 overruns. SlimeVR's log had no errors, warnings or disconnects. Worst loop gap 8-12 ms. |
+
+Not tested: a cold start (tracker off, then on) and a tracker that is moving
+or worn. The owner chose to skip both (25 Nov).
+
+Seen while setting up, not changed:
+- `SET WIFI` stalls the loop for about 2.2 s (it saves the network and stops
+  the dongle radio), which overran the FIFO twice. One-time, while the
+  tracker is on a cable being set up; it recovered at once.
+- `GET WIFISCAN` blocks for a few seconds and overran the FIFO once. Same:
+  only when someone runs it.
 
 Note for reading `GET PERF`: a still tracker sends rotation only when it
 changes (`OPTIMIZE_UPDATES`), which on a desk is under once a second, so
