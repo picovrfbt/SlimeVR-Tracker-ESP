@@ -65,8 +65,11 @@ struct I2CImpl {
 		);
 	}
 
-	void readBytes(uint8_t regAddr, uint8_t size, uint8_t* buffer) const {
-		I2Cdev::readBytes(m_devAddr, regAddr, size, buffer);
+	/// True only if every byte asked for arrived. After a bus error the buffer
+	/// holds whatever was in it before, which must not be taken for data.
+	bool readBytes(uint8_t regAddr, uint8_t size, uint8_t* buffer) const {
+		return I2Cdev::readBytes(m_devAddr, regAddr, size, buffer)
+			== static_cast<int8_t>(size);
 	}
 
 	void writeBytes(uint8_t regAddr, uint8_t size, uint8_t* buffer) const {

@@ -65,22 +65,76 @@ struct LSM6DSOutputHandler {
 		constexpr auto FIFO_SAMPLES_MASK = 0x3ff;
 		constexpr auto FIFO_OVERRUN_LATCHED_MASK = 0x800;
 
-		const auto fifo_status = i2c.readReg16(Regs::FifoStatus);
-		const auto available_axes = fifo_status & FIFO_SAMPLES_MASK;
-		const auto fifo_bytes = available_axes * FullFifoEntrySize;
+		// A bus error leaves the buffers holding whatever was in them before.
+		// Before this the reads were not checked, so a failed read was parsed
+		// as FIFO entries anyway and fed leftover memory to the fusion as gyro
+		// and accelerometer samples. Now a failed read is dropped and the poll
+		// ends; the readings are still in the FIFO for the next one.
+		uint16_t fifo_status = 0;
+		if (!i2c.readBytes(
+				Regs::FifoStatus,
+				sizeof(fifo_status),
+				reinterpret_cast<uint8_t*>(&fifo_status)
+			)) {
+			return;
+		}
 		if (fifo_status & FIFO_OVERRUN_LATCHED_MASK) {
-			// FIFO overrun is expected to happen during startup and calibration
-			logger.error("FIFO OVERRUN! This occuring during normal usage is an issue."
-			);
+			// FIFO overrun is expected to happen during startup and calibration.
+			// Said once and then every hundredth time: printing it on every poll
+			// slowed the loop down and made the next overrun more likely.
+			if (overrunCount++ % 100 == 0) {
+				logger.error(
+					"FIFO OVERRUN! This occuring during normal usage is an issue. "
+					"(%u so far)",
+					static_cast<unsigned>(overrunCount)
+				);
+			}
 		}
 
-		std::array<uint8_t, FullFifoEntrySize * 8> read_buffer;  // max 8 readings
-		const auto bytes_to_read = std::min(
-									   static_cast<size_t>(read_buffer.size()),
-									   static_cast<size_t>(fifo_bytes)
-								   )
-								 / FullFifoEntrySize * FullFifoEntrySize;
-		i2c.readBytes(Regs::FifoData, bytes_to_read, read_buffer.data());
+		// One read takes at most 8 readings, and a poll normally finds about
+		// five. When the loop has been held up - a bus error can hold it for
+		// 150 ms - one read per poll barely keeps pace and the FIFO overruns,
+		// so read until it is empty, up to a few reads per poll.
+		size_t available_entries = fifo_status & FIFO_SAMPLES_MASK;
+		std::array<uint8_t, FullFifoEntrySize * 8> read_buffer;
+		for (size_t chunk = 0; chunk < MaxReadsPerPoll && available_entries > 0;
+			 chunk++) {
+			const size_t entries = std::min(
+				available_entries,
+				read_buffer.size() / FullFifoEntrySize
+			);
+			const size_t bytes_to_read = entries * FullFifoEntrySize;
+			if (!i2c.readBytes(Regs::FifoData, bytes_to_read, read_buffer.data())) {
+				return;
+			}
+			available_entries -= entries;
+			parseFifo(
+				read_buffer.data(),
+				bytes_to_read,
+				processAccelSample,
+				processGyroSample,
+				processTemperatureSample,
+				GyrTs,
+				AccTs,
+				TempTs
+			);
+		}
+	}
+
+	static constexpr size_t MaxReadsPerPoll = 4;
+	uint32_t overrunCount = 0;
+
+	template <typename AccelCall, typename GyroCall, typename TemperatureCall>
+	static void parseFifo(
+		const uint8_t* read_buffer,
+		size_t bytes_to_read,
+		AccelCall& processAccelSample,
+		GyroCall& processGyroSample,
+		TemperatureCall& processTemperatureSample,
+		float GyrTs,
+		float AccTs,
+		float TempTs
+	) {
 		for (auto i = 0u; i < bytes_to_read; i += FullFifoEntrySize) {
 			FifoEntryAligned entry;
 			uint8_t tag = read_buffer[i] >> 3;

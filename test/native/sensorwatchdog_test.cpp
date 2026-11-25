@@ -74,6 +74,18 @@ using SlimeVR::Sensors::SensorWatchdog;
 struct FakeLSM6DSV {
 	std::map<uint8_t, uint8_t> registers;
 	std::deque<std::array<uint8_t, 7>> fifo;  // tag byte + 6 data bytes
+	// The LSM6DSV FIFO holds about 4.5 KB: 640 seven-byte entries.
+	static constexpr size_t fifoCapacity = 640;
+	bool overrunLatched = false;
+	size_t overruns = 0;
+	void push(const std::array<uint8_t, 7>& entry) {
+		if (fifo.size() >= fifoCapacity) {
+			fifo.pop_front();
+			overrunLatched = true;
+			overruns++;
+		}
+		fifo.push_back(entry);
+	}
 	bool gyroBlockDead = false;
 	// The other shape of the fault: readings keep coming, frozen at one value.
 	bool gyroStuck = false;
@@ -112,7 +124,7 @@ struct FakeLSM6DSV {
 	/// One poll interval's worth of readings appears in the FIFO.
 	void produce(int gyroSamples, int accelSamples) {
 		for (int i = 0; i < accelSamples; i++) {
-			fifo.push_back({0x02 << 3, 1, 0, 2, 0, 3, 0});
+			push({0x02 << 3, 1, 0, 2, 0, 3, 0});
 		}
 		if (gyroBlockDead || !gyroConfigured()) {
 			return;
@@ -127,7 +139,7 @@ struct FakeLSM6DSV {
 				entry[1 + axis * 2] = static_cast<uint8_t>(value & 0xff);
 				entry[2 + axis * 2] = static_cast<uint8_t>((value >> 8) & 0xff);
 			}
-			fifo.push_back(entry);
+			push(entry);
 		}
 	}
 };
@@ -148,7 +160,23 @@ struct FakeI2C {
 	void writeReg(uint8_t reg, uint8_t value) { chip->write(reg, value); }
 	void writeReg16(uint8_t, uint16_t) {}
 	void writeBytes(uint8_t, uint16_t, uint8_t*) {}
-	void readBytes(uint8_t, size_t count, uint8_t* out) {
+	// Reads of this register still to fail, as a bus error does: nothing is
+	// written to the buffer, so it keeps whatever was in it before.
+	uint8_t failReg = 0;
+	int failCount = 0;
+
+	bool readBytes(uint8_t reg, size_t count, uint8_t* out) {
+		if (failCount > 0 && reg == failReg) {
+			failCount--;
+			return false;
+		}
+		if (reg == 0x1b) {  // FIFO_STATUS1/2: count, overrun latched at bit 11
+			uint16_t status = static_cast<uint16_t>(chip->fifo.size() & 0x3ff);
+			if (chip->overrunLatched) status |= 0x800;
+			chip->overrunLatched = false;  // cleared by reading it
+			std::memcpy(out, &status, std::min<size_t>(count, 2));
+			return true;
+		}
 		for (size_t i = 0; i + 7 <= count; i += 7) {
 			if (chip->fifo.empty()) {
 				std::memset(out + i, 0, 7);
@@ -157,6 +185,7 @@ struct FakeI2C {
 			std::memcpy(out + i, chip->fifo.front().data(), 7);
 			chip->fifo.pop_front();
 		}
+		return true;
 	}
 };
 
@@ -368,6 +397,60 @@ int main() {
 		const int16_t moved[3]{0, 1, 0};
 		f.sample(moved, 3002);
 		check(!f.frozen(3002), "one reading that moves clears it");
+	}
+
+	{
+		// A bus error must not turn into readings. The driver is handed a
+		// fresh buffer each poll, which on a real tracker holds whatever was
+		// on the stack - often the last poll's entries.
+		FakeLSM6DSV c;
+		Driver d(FakeI2C{&c}, logger);
+		d.initialize();
+		auto& bus = d.i2c;
+
+		int g = 0, a = 0;
+		c.produce(3, 1);
+		poll(d, g, a);
+		check(g == 3 && a == 1, "a normal read delivers its readings");
+
+		c.produce(3, 1);
+		bus.failReg = 0x1b;
+		bus.failCount = 1;
+		g = a = 0;
+		poll(d, g, a);
+		check(g == 0 && a == 0, "a failed status read delivers nothing");
+		check(c.fifo.size() == 4, "and leaves the readings in the FIFO");
+		g = a = 0;
+		poll(d, g, a);
+		check(g == 3 && a == 1, "the next poll gets them");
+
+		c.produce(3, 1);
+		bus.failReg = 0x78;
+		bus.failCount = 1;
+		g = a = 0;
+		poll(d, g, a);
+		check(g == 0 && a == 0, "a failed data read delivers nothing, not leftover memory");
+		bus.failCount = 0;
+	}
+
+	{
+		// The loop held up for 150 ms - what one bus timeout costs - must be
+		// caught up, not left to grow into an overrun.
+		FakeLSM6DSV c;
+		Driver d(FakeI2C{&c}, logger);
+		d.initialize();
+		int g = 0, a = 0;
+		for (int stall = 0; stall < 20; stall++) {
+			// 150 ms of readings arrive with nobody polling: 72 gyro, 36 accel.
+			c.produce(72, 36);
+			// Then the loop polls every 6 ms for the next 50 ms.
+			for (int i = 0; i < 8; i++) {
+				c.produce(3, (i % 2) ? 2 : 1);
+				poll(d, g, a);
+			}
+		}
+		check(c.overruns == 0, "a 150 ms stall every 200 ms never overruns the FIFO");
+		check(c.fifo.size() < 8, "and the backlog is drained between stalls");
 	}
 
 	std::printf("\n%s\n", failures == 0 ? "all checks passed" : "SOME CHECKS FAILED");
