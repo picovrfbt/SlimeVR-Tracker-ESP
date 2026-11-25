@@ -31,6 +31,37 @@ jobs:
           g++ -std=c++20 -Wall -I src -o sensor_test test/native/sensorwatchdog_test.cpp
           ./sensor_test
 
+  # What customers actually get: the web flasher writes its own defines.h
+  # and runs this env from platformio-tools.ini. PICOVR_TOPAZ selects the
+  # same board and LSM6DSV settings, so this is the closest thing to the
+  # flasher's build that CI can make. Nothing reaches MBE-Thing unless this
+  # builds.
+  #
+  # Its own job on purpose: switching PlatformIO config files (-c) deletes
+  # the other envs' build folders, so in the same job as `build` it wiped
+  # picovr_topaz before Package could read it.
+  web-flasher-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-tools-${{ hashFiles('platformio-tools.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build the way the web flasher does
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DPICOVR_TOPAZ
+        run: pio run -c platformio-tools.ini -e BOARD_TOPAZESTROGEN
+
   build:
     runs-on: ubuntu-24.04
     steps:
@@ -67,16 +98,6 @@ jobs:
         env:
           FIRMWARE_VERSION: ${{ steps.version.outputs.version }}
         run: pio run -e picovr_topaz -e picovr_topaz_bno
-
-      # What customers actually get: the web flasher writes its own defines.h
-      # and runs this env from platformio-tools.ini. PICOVR_TOPAZ selects the
-      # same board and LSM6DSV settings, so this is the closest thing to the
-      # flasher's build that CI can make. Nothing reaches MBE-Thing unless this
-      # builds.
-      - name: Build the way the web flasher does
-        env:
-          PLATFORMIO_BUILD_FLAGS: -DPICOVR_TOPAZ
-        run: pio run -c platformio-tools.ini -e BOARD_TOPAZESTROGEN
 
       - name: Package
         run: python scripts/package_tracker.py dist-tracker ${{ steps.version.outputs.version }}

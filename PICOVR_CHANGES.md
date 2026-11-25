@@ -66,6 +66,7 @@ with stock SlimeVR Server v0.17.0. Native test 39/39, `picovr_topaz`,
 | `428542c` | Remove the blocking 100 ms LED blink on every calibration save (upstream removed it too) |
 | `30c5925` | `GET PERF` serial command: loop time per section, worst stall, fusion share, sample and packet rates, I2C failures, FIFO overruns |
 | `19cf5cf` | CI runs on MBE-Thing (it only watched `picovr-dongle` before), runs the native test, and builds like the web flasher |
+| (next commit) | CI: the web flasher build gets its own job. In the same job it wiped the `picovr_topaz` build before packaging, so the first CI run on MBE-Thing (`db537af`) failed at Package; every build itself passed. |
 
 To ship any of these, follow the rules above first.
 
