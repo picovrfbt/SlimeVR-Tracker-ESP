@@ -223,8 +223,9 @@ private:
 		calibration.data.nonblocking = sensorConfig;
 		configuration.setSensor(sensorId, calibration);
 		configuration.save();
-
-		ledManager.blink(100);
+		// No LED blink here: blink() is a blocking 100 ms delay, which froze
+		// the whole tracker - no readings, no packets - every time a calibration
+		// point was saved. Upstream SlimeVR removed it too.
 	}
 
 	enum class CalibrationPrintFlags {
