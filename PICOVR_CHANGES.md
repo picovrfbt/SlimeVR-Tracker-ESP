@@ -52,7 +52,7 @@ These exist because each one was broken once, and a customer paid for it (see
 | `33f225d` | 24 Nov | Restored all files to `16c5b36` | Superseded by the next |
 | `ecce373` | 24 Nov | Undid `33f225d`: files back to `c217d06` | Same files as `c217d06` |
 
-## On local branch `fix/i2c-bus` only (not on MBE-Thing, not run on a tracker)
+## On local branch `fix/i2c-bus` only (not on MBE-Thing)
 
 | Commit | Change |
 |---|---|
@@ -63,6 +63,25 @@ These exist because each one was broken once, and a customer paid for it (see
 | `19cf5cf` | CI runs on MBE-Thing (it only watched `picovr-dongle` before), runs the native test, and builds like the web flasher |
 
 To ship any of these, follow the rules above first.
+
+### Hardware tests of `fix/i2c-bus` (25 Nov 2026)
+
+Tracker: PicoVR LSM6DSV board, MAC `90:DA:72:92:FF:14`, on USB on a desk, not
+moved. Built as the web flasher does (`BOARD_TOPAZESTROGEN` with
+`-DPICOVR_TOPAZ`), flashed as boot_app0 + app0 so calibration stayed.
+
+| Run | Length | Result |
+|---|---|---|
+| Old build `a25f870` (control), after a reset | 13 min | No freeze. Its gyro change never switched on: it waits for 5 C of warming and the desk gave 3 C (23 to 26 C). A desk cannot reproduce the customer freeze. |
+| `fix/i2c-bus`, USB only, no server | 35 min | Gyro 480/s and accel 240/s every minute. 0 I2C failures, 0 FIFO overruns. Rotation kept updating. Worst loop gap 7-9 ms, once 13 ms (FIFO holds about 0.8 s). |
+| `fix/i2c-bus` through PicoVR Dongle 1.1.0 to PicoVR Server | 31 min | Connected in 5 s, followed the server's channel change 11 to 12 by itself. 0 failures, 0 overruns, 0 packets lost, signal -42 dBm throughout, no disconnects. One 0.1 s pause when switching from Wi-Fi to the dongle. |
+
+Not tested yet: a cold start (tracker off, then on), Wi-Fi, stock SlimeVR
+Server, and a tracker that is moving or worn.
+
+Note for reading `GET PERF`: a still tracker sends rotation only when it
+changes (`OPTIMIZE_UPDATES`), which on a desk is under once a second, so
+"rotation packets 0/s" is normal there.
 
 ## What went wrong, 10-24 November 2026
 
